@@ -1,0 +1,17 @@
+# GraphRAG系统依赖包 - Conda环境版本
+# 这个文件专门用于conda环境，避免了pip构建问题
+
+# 核心依赖
+neo4j==5.15.0
+requests==2.31.0
+flask==3.0.0
+python-dotenv==1.0.0
+
+# 可选依赖（conda通常能更好地处理编译依赖）
+numpy
+scikit-learn
+sentence-transformers
+
+# 注意：conda会自动处理大部分编译依赖
+# 如果遇到问题，可以使用以下命令：
+# conda install numpy scikit-learn

@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>计算机网络知识图谱GraphRAG系统</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .debug-info {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            z-index: 9999;
+        }
+        
+        .btn-test {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        
+        .btn-test:hover {
+            background: #218838;
+        }
+    </style>
+</head>
+<body>
+    <div class="debug-info" id="debugInfo">
+        调试信息：<span id="debugText">页面加载中...</span>
+    </div>
+
+    <div class="header">
+        <div class="container">
+            <div class="row align-items-center">
+                <div class="col-md-8">
+                    <h1 class="mb-0">
+                        <i class="fas fa-network-wired me-3"></i>
+                        计算机网络知识图谱GraphRAG系统
+                    </h1>
+                    <p class="lead mb-0 mt-2">基于大语言模型的智能知识问答系统</p>
+                </div>
+                <div class="col-md-4 text-end">
+                    <div class="stats-card">
+                        <div class="stats-number" id="totalNodes">-</div>
+                        <div class="text-muted">知识节点</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="row">
+            <div class="col-lg-6">
+                <div class="query-card">
+                    <h3 class="mb-4">
+                        <i class="fas fa-question-circle me-2"></i>
+                        智能问答
+                    </h3>
+                    
+                    <div class="example-questions">
+                        <h6>示例问题：</h6>
+                        <div class="example-questions-container">
+                            <span class="example-question" id="example1">TCP和UDP有什么区别？</span>
+                            <span class="example-question" id="example2">HTTP和HTTPS的关系是什么？</span>
+                            <span class="example-question" id="example3">路由器的工作原理是什么？</span>
+                            <span class="example-question" id="example4">如何解决网络环路问题？</span>
+                        </div>
+                    </div>
+                    
+                    <div class="search-box">
+                        <div class="input-group">
+                            <input type="text" 
+                                   class="form-control form-control-lg form-control-custom" 
+                                   id="questionInput" 
+                                   placeholder="请输入您的网络相关问题...">
+                            <button class="voice-btn" id="voiceBtn" title="语音输入">
+                                <i class="fas fa-microphone"></i>
+                            </button>
+                            <button class="btn btn-custom btn-lg" type="button" id="submitBtn">
+                                <i class="fas fa-search me-2"></i>提问
+                            </button>
+                        </div>
+                        <div class="search-suggestions" id="searchSuggestions"></div>
+                    </div>
+                    
+                    <div class="loading" id="loading" style="display: none;">
+                        <div class="spinner"></div>
+                        <p>正在分析您的问题，请稍候...</p>
+                    </div>
+                    
+                    <!-- 测试按钮 -->
+                    <div class="mt-3">
+                        <button class="btn-test" onclick="testJS()">测试JavaScript</button>
+                        <button class="btn-test" onclick="testAPI()">测试API连接</button>
+                    </div>
+                </div>
+                
+                <div class="answer-card" id="answerCard" style="display: none;">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h4 class="mb-0">
+                            <i class="fas fa-lightbulb me-2"></i>
+                            答案
+                        </h4>
+                        <div class="btn-group" role="group">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="copyAnswer()" title="复制答案">
+                                <i class="fas fa-copy"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="shareAnswer()" title="分享">
+                                <i class="fas fa-share"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div id="answerContent"></div>
+                    <div class="mt-3 text-muted">
+                        <small>
+                            <i class="fas fa-clock me-1"></i>
+                            处理时间：<span id="processingTime"></span>秒
+                        </small>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-lg-6">
+                <div class="graph-container">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h4 class="mb-0">
+                            <i class="fas fa-project-diagram me-2"></i>
+                            知识图谱可视化
+                        </h4>
+                        <button class="btn btn-sm btn-outline-primary" onclick="exportGraph()" title="导出图谱">
+                            <i class="fas fa-download"></i>
+                        </button>
+                    </div>
+                    <div id="graph"></div>
+                </div>
+                
+                <div class="mt-3">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="stats-card">
+                                <div class="stats-number" id="nodeCount">0</div>
+                                <div class="text-muted">相关节点</div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="stats-card">
+                                <div class="stats-number" id="edgeCount">0</div>
+                                <div class="text-muted">关系连接</div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="stats-card">
+                                <div class="stats-number" id="pathCount">0</div>
+                                <div class="text-muted">路径数量</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script>
+        // 全局变量
+        let currentGraph = null;
+        let simulation = null;
+
+        // 调试信息更新
+        function updateDebugInfo(message) {
+            document.getElementById('debugText').textContent = message;
+            console.log('DEBUG:', message);
+        }
+
+        // 页面加载完成
+        document.addEventListener('DOMContentLoaded', function() {
+            updateDebugInfo('页面加载完成，开始初始化...');
+            
+            // 测试基本DOM元素
+            const submitBtn = document.getElementById('submitBtn');
+            const questionInput = document.getElementById('questionInput');
+            const example1 = document.getElementById('example1');
+            
+            if (submitBtn) {
+                updateDebugInfo('找到提交按钮');
+                submitBtn.addEventListener('click', submitQuery);
+            } else {
+                updateDebugInfo('错误：找不到提交按钮');
+            }
+            
+            if (questionInput) {
+                updateDebugInfo('找到输入框');
+                questionInput.addEventListener('keypress', handleKeyPress);
+            } else {
+                updateDebugInfo('错误：找不到输入框');
+            }
+            
+            if (example1) {
+                updateDebugInfo('找到示例问题');
+                example1.addEventListener('click', function() {
+                    askQuestion('TCP和UDP有什么区别？');
+                });
+                
+                // 为所有示例问题添加点击事件
+                document.querySelectorAll('.example-question').forEach((elem, index) => {
+                    const questions = [
+                        'TCP和UDP有什么区别？',
+                        'HTTP和HTTPS的关系是什么？',
+                        '路由器的工作原理是什么？',
+                        '如何解决网络环路问题？'
+                    ];
+                    elem.addEventListener('click', function() {
+                        askQuestion(questions[index]);
+                    });
+                });
+            } else {
+                updateDebugInfo('错误：找不到示例问题');
+            }
+            
+            // 初始化其他功能
+            loadGraphStats();
+            setupSearchSuggestions();
+            
+            updateDebugInfo('初始化完成');
+        });
+
+        // 测试JavaScript功能
+        function testJS() {
+            updateDebugInfo('JavaScript测试：所有函数正常');
+            alert('JavaScript功能正常工作！');
+        }
+
+        // 测试API连接
+        async function testAPI() {
+            updateDebugInfo('测试API连接...');
+            try {
+                const response = await fetch('/api/health');
+                const data = await response.json();
+                updateDebugInfo('API连接正常：' + JSON.stringify(data));
+                alert('API连接正常！系统状态：' + data.status);
+            } catch (error) {
+                updateDebugInfo('API连接失败：' + error.message);
+                alert('API连接失败：' + error.message);
+            }
+        }
+
+        // 加载图统计信息
+        async function loadGraphStats() {
+            try {
+                updateDebugInfo('加载图统计信息...');
+                const response = await fetch('/api/graph_stats');
+                const stats = await response.json();
+                if (stats.totalNodes) {
+                    document.getElementById('totalNodes').textContent = stats.totalNodes;
+                    updateDebugInfo('图统计加载成功：' + stats.totalNodes + ' 个节点');
+                }
+            } catch (error) {
+                updateDebugInfo('加载统计信息失败：' + error.message);
+            }
+        }
+
+        // 设置搜索建议
+        function setupSearchSuggestions() {
+            const input = document.getElementById('questionInput');
+            const suggestions = document.getElementById('searchSuggestions');
+            
+            if (!input || !suggestions) {
+                updateDebugInfo('搜索建议元素未找到');
+                return;
+            }
+            
+            input.addEventListener('input', async function() {
+                const query = this.value.trim();
+                if (query.length < 2) {
+                    suggestions.style.display = 'none';
+                    return;
+                }
+                
+                try {
+                    const response = await fetch(`/api/search_nodes?q=${encodeURIComponent(query)}`);
+                    const data = await response.json();
+                    
+                    if (data.nodes && data.nodes.length > 0) {
+                        suggestions.innerHTML = '';
+                        data.nodes.slice(0, 5).forEach(node => {
+                            const item = document.createElement('div');
+                            item.className = 'suggestion-item';
+                            item.textContent = `${node.name} (${node.type})`;
+                            item.onclick = () => {
+                                input.value = `关于${node.name}的问题`;
+                                suggestions.style.display = 'none';
+                            };
+                            suggestions.appendChild(item);
+                        });
+                        suggestions.style.display = 'block';
+                    } else {
+                        suggestions.style.display = 'none';
+                    }
+                } catch (error) {
+                    updateDebugInfo('搜索建议失败：' + error.message);
+                }
+            });
+        }
+
+        // 处理回车键
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                submitQuery();
+            }
+        }
+
+        // 示例问题点击
+        function askQuestion(question) {
+            updateDebugInfo('选择示例问题：' + question);
+            document.getElementById('questionInput').value = question;
+            submitQuery();
+        }
+
+        // 提交查询
+        async function submitQuery() {
+            const question = document.getElementById('questionInput').value.trim();
+            if (!question) {
+                alert('请输入您的问题');
+                return;
+            }
+
+            updateDebugInfo('提交查询：' + question);
+
+            // 显示加载状态
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('answerCard').style.display = 'none';
+            document.getElementById('searchSuggestions').style.display = 'none';
+
+            try {
+                updateDebugInfo('发送API请求...');
+                const response = await fetch('/api/query', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ question: question })
+                });
+
+                updateDebugInfo('收到响应，状态码：' + response.status);
+                
+                // 检查响应是否为JSON
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    const text = await response.text();
+                    updateDebugInfo('非JSON响应：' + text.substring(0, 200));
+                    throw new Error('服务器返回非JSON格式的响应');
+                }
+                
+                const data = await response.json();
+                updateDebugInfo('解析JSON成功');
+                
+                if (response.ok) {
+                    updateDebugInfo('查询成功，处理响应数据');
+                    displayAnswer(data);
+                    if (data.graph_data) {
+                        displayGraph(data.graph_data);
+                    } else {
+                        updateDebugInfo('警告：没有图数据');
+                    }
+                } else {
+                    updateDebugInfo('查询失败：' + (data.error || '未知错误'));
+                    throw new Error(data.error || '查询失败');
+                }
+            } catch (error) {
+                updateDebugInfo('查询异常：' + error.message);
+                console.error('查询错误详情:', error);
+                document.getElementById('answerContent').innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        错误：${error.message || '查询失败，请稍后再试'}
+                        <br><small>请检查控制台获取更多详细信息</small>
+                    </div>
+                `;
+                document.getElementById('answerCard').style.display = 'block';
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        // 显示答案
+        function displayAnswer(data) {
+            const answerContent = document.getElementById('answerContent');
+            
+            // 检查是否有formatAnswer函数可用，如果没有则使用简单的换行替换
+            const formattedAnswer = typeof formatAnswer !== 'undefined' 
+                ? formatAnswer(data.answer) 
+                : data.answer.replace(/\n/g, '<br>');
+                
+            answerContent.innerHTML = `
+                <div class="alert alert-info">
+                    <strong>问题：</strong>${data.question}
+                </div>
+                <div class="mt-3 answer-content">
+                    ${formattedAnswer}
+                </div>
+            `;
+            
+            document.getElementById('processingTime').textContent = data.processing_time ? data.processing_time.toFixed(2) : '未知';
+            document.getElementById('answerCard').style.display = 'block';
+            
+            updateDebugInfo('答案显示完成');
+        }
+
+        // 显示图
+        function displayGraph(graphData) {
+            if (!graphData || !graphData.nodes) {
+                updateDebugInfo('没有图数据');
+                return;
+            }
+
+            updateDebugInfo('显示图谱：' + graphData.nodes.length + ' 个节点');
+
+            // 更新统计信息
+            document.getElementById('nodeCount').textContent = graphData.nodes.length;
+            document.getElementById('edgeCount').textContent = graphData.relationships ? graphData.relationships.length : 0;
+            document.getElementById('pathCount').textContent = graphData.paths ? graphData.paths.length : 0;
+
+            // 清除现有图
+            d3.select('#graph').selectAll('*').remove();
+
+            const width = document.getElementById('graph').clientWidth;
+            const height = document.getElementById('graph').clientHeight;
+
+            const svg = d3.select('#graph')
+                .append('svg')
+                .attr('width', width)
+                .attr('height', height);
+
+            // 处理关系数据 - 将start/end转换为source/target
+            const processedRelationships = [];
+            if (graphData.relationships) {
+                graphData.relationships.forEach(rel => {
+                    if (rel.start && rel.end && rel.start.name && rel.end.name) {
+                        processedRelationships.push({
+                            source: rel.start.name,
+                            target: rel.end.name,
+                            type: rel.type || 'RELATED_TO'
+                        });
+                    } else {
+                        updateDebugInfo('关系数据格式不正确: ' + JSON.stringify(rel));
+                    }
+                });
+            }
+            
+            // 创建力导向图
+            simulation = d3.forceSimulation(graphData.nodes)
+                .force('link', d3.forceLink(processedRelationships).id(d => d.name).distance(100))
+                .force('charge', d3.forceManyBody().strength(-300))
+                .force('center', d3.forceCenter(width / 2, height / 2))
+                .force('collision', d3.forceCollide().radius(30));
+
+            // 创建箭头标记
+            svg.append('defs').selectAll('marker')
+                .data(['arrow'])
+                .enter().append('marker')
+                .attr('id', d => d)
+                .attr('viewBox', '0 -5 10 10')
+                .attr('refX', 15)
+                .attr('refY', -1.5)
+                .attr('markerWidth', 6)
+                .attr('markerHeight', 6)
+                .attr('orient', 'auto')
+                .append('path')
+                .attr('d', 'M0,-5L10,0L0,5')
+                .attr('fill', '#999');
+
+            // 创建关系线
+            const link = svg.append('g')
+                .selectAll('line')
+                .data(processedRelationships)
+                .enter().append('line')
+                .attr('class', 'link')
+                .attr('marker-end', 'url(#arrow)');
+
+            // 创建节点组
+            const node = svg.append('g')
+                .selectAll('.node')
+                .data(graphData.nodes)
+                .enter().append('g')
+                .attr('class', 'node')
+                .call(d3.drag()
+                    .on('start', dragstarted)
+                    .on('drag', dragged)
+                    .on('end', dragended));
+
+            // 添加节点圆圈
+            node.append('circle')
+                .attr('r', 15)
+                .attr('fill', d => getNodeColor(d.type))
+                .attr('stroke', '#fff')
+                .on('click', showNodeDetails);
+
+            // 添加节点标签
+            node.append('text')
+                .attr('class', 'node-label')
+                .attr('dy', -20)
+                .attr('text-anchor', 'middle')
+                .text(d => d.name.length > 10 ? d.name.substring(0, 10) + '...' : d.name);
+
+            // 更新位置
+            simulation.on('tick', () => {
+                link
+                    .attr('x1', d => d.source.x)
+                    .attr('y1', d => d.source.y)
+                    .attr('x2', d => d.target.x)
+                    .attr('y2', d => d.target.y);
+
+                node
+                    .attr('transform', d => `translate(${d.x},${d.y})`);
+            });
+
+            // 拖拽函数
+            function dragstarted(event, d) {
+                if (!event.active) simulation.alphaTarget(0.3).restart();
+                d.fx = d.x;
+                d.fy = d.y;
+            }
+
+            function dragged(event, d) {
+                d.fx = event.x;
+                d.fy = event.y;
+            }
+
+            function dragended(event, d) {
+                if (!event.active) simulation.alphaTarget(0);
+                d.fx = null;
+                d.fy = null;
+            }
+
+            // 显示节点详情
+            function showNodeDetails(event, d) {
+                alert(`节点: ${d.name}\n类型: ${d.type}`);
+            }
+        }
+
+        // 获取节点颜色
+        function getNodeColor(type) {
+            const colors = {
+                'Protocol': '#ff6b6b',
+                'Device': '#4ecdc4',
+                'Layer': '#45b7d1',
+                'Knowledge': '#96ceb4',
+                'SecurityConcept': '#feca57',
+                'NetworkType': '#ff9ff3',
+                'Model': '#54a0ff',
+                'Function': '#48dbfb',
+                'Topology': '#1dd1a1',
+                'Problem': '#ee5a24',
+                'Solution': '#10ac84'
+            };
+            return colors[type] || '#95a5a6';
+        }
+
+        // 简化的功能函数
+        function toggleVoiceRecognition() {
+            alert('语音识别功能：需要浏览器支持Web Speech API');
+        }
+
+        function copyAnswer() {
+            const answerText = document.getElementById('answerContent').textContent;
+            navigator.clipboard.writeText(answerText).then(() => {
+                alert('答案已复制到剪贴板');
+            });
+        }
+
+        function shareAnswer() {
+            alert('分享功能');
+        }
+
+        function exportGraph() {
+            alert('导出图谱功能');
+        }
+    </script>
+</body>
+</html>

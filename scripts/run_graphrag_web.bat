@@ -1,0 +1,3 @@
+@echo off
+echo 启动 GraphRAG Web 界面（使用 Anaconda Python 环境）...
+D:\Anaconda3\python.exe ..\run.py --mode web %*

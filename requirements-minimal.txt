@@ -1,0 +1,11 @@
+# GraphRAG系统最小化依赖包
+# 只包含核心必需的包，避免依赖冲突
+
+neo4j==5.15.0
+requests==2.31.0
+flask==3.0.0
+python-dotenv==1.0.0
+
+# 注意：这个文件只包含核心功能所需的包
+# 如果需要额外功能，可以单独安装：
+# pip install numpy pandas scikit-learn

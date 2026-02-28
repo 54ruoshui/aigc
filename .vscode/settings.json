@@ -1,0 +1,7 @@
+{
+    "python.defaultInterpreterPath": "D:\\python3.9\\python.exe",
+    "python.terminal.activateEnvironment": true,
+    "json.schemas": [],
+    "json.validate.enable": false,
+    "python.languageServer": "Jedi"
+}
