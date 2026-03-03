@@ -13,7 +13,6 @@ import logging
 
 # 添加项目根目录到Python路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from src.graph_rag_system import GraphRAGSystem, GraphRAGConfig
 from src.knowledge_extraction import KnowledgeExtractor, KnowledgeExtractionConfig
 from src.enhanced_knowledge_extraction import EnhancedKnowledgeExtractor, EnhancedExtractionConfig
@@ -25,14 +24,9 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# 获取项目根目录的绝对路径
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-template_folder = os.path.join(project_root, 'templates')
-static_folder = os.path.join(project_root, 'static')
-
 app = Flask(__name__,
-           template_folder=template_folder,
-           static_folder=static_folder)
+           template_folder='../templates',
+           static_folder='../static')
 
 # 使用应用上下文存储系统实例
 rag_system = None
@@ -210,7 +204,7 @@ def init_enhanced_knowledge_extractor():
 @app.route('/')
 def index():
     """主页"""
-    return render_template('integrated_index.html')
+    return render_template('enhanced_index.html')
 
 @app.route('/api/query', methods=['POST'])
 def query():
@@ -369,7 +363,7 @@ def extract_knowledge():
                 message_parts.append(f"更新了 {result['stats']['nodes_updated']} 个现有节点")
             
             if result['stats']['relationships_created'] > 0:
-                message_parts.append(f"更新了 {result['stats']['relationships_created']} 个新关系")
+                message_parts.append(f"创建了 {result['stats']['relationships_created']} 个新关系")
             
             if result['stats']['errors'] > 0:
                 message_parts.append(f"遇到 {result['stats']['errors']} 个错误")
@@ -404,11 +398,11 @@ def extract_knowledge():
         return jsonify(response_data)
         
     except Exception as e:
-            logger.error(f"❌ 知识点提取失败: {e}")
-            return jsonify({
-                "error": str(e),
-                "message": "知识点提取失败，请稍后再试"
-            }), 500
+        logger.error(f"❌ 知识点提取失败: {e}")
+        return jsonify({
+            "error": str(e),
+            "message": "知识点提取失败，请稍后再试"
+        }), 500
 
 @app.route('/api/submit_feedback', methods=['POST'])
 def submit_feedback():
@@ -433,7 +427,7 @@ def submit_feedback():
                 "message": "请提供完整的反馈信息"
             }), 400
         
-        # 提�交反馈
+        # 提交反馈
         enhanced_extractor.submit_feedback(item_type, item, is_correct, correction)
         
         # 获取反馈摘要
@@ -446,11 +440,11 @@ def submit_feedback():
         })
         
     except Exception as e:
-            logger.error(f"❌ 反馈提交失败: {e}")
-            return jsonify({
-                "error": str(e),
-                "message": "反馈提交失败，请稍后再试"
-            }), 500
+        logger.error(f"❌ 反馈提交失败: {e}")
+        return jsonify({
+            "error": str(e),
+            "message": "反馈提交失败，请稍后再试"
+        }), 500
 
 @app.route('/api/validation_stats')
 def get_validation_stats():
@@ -587,8 +581,7 @@ def health_check():
         "skill_validation_enabled": enhanced_extractor.config.enable_validation if enhanced_extractor else False
     })
 
-def main():
-    """主函数"""
+if __name__ == '__main__':
     # 初始化系统
     init_success = init_rag_system()
     if not init_success:
@@ -601,16 +594,16 @@ def main():
     
     # 创建模板目录
     try:
-        if not os.path.exists(template_folder):
-            os.makedirs(template_folder)
+        if not os.path.exists('templates'):
+            os.makedirs('templates')
             logger.info("✅ 创建模板目录成功")
     except Exception as e:
         logger.error(f"❌ 创建模板目录失败: {e}")
     
     # 创建静态文件目录
     try:
-        if not os.path.exists(static_folder):
-            os.makedirs(static_folder)
+        if not os.path.exists('static'):
+            os.makedirs('static')
             logger.info("✅ 创建静态文件目录成功")
     except Exception as e:
         logger.error(f"❌ 创建静态文件目录失败: {e}")
@@ -618,6 +611,3 @@ def main():
     # 启动Web应用
     logger.info("🚀 启动增强版GraphRAG Web应用（带技能验证）")
     app.run(debug=False, host='0.0.0.0', port=5000)
-
-if __name__ == '__main__':
-    main()

@@ -82,17 +82,30 @@ class GraphRetriever:
             return []
             
         # 使用参数化查询，避免SQL注入，并支持大小写不敏感
+        # 修复：使用正则表达式实现不区分大小写的搜索，避免对数组属性使用toString()
         cypher = """
         MATCH (n)
-        WHERE toLower(n.name) CONTAINS toLower($query)
-           OR toLower(n.description) CONTAINS toLower($query)
-           OR toLower(n.full_name) CONTAINS toLower($query)
+        WHERE (n.name IS NOT NULL AND n.name =~ $query_regex)
+           OR (n.description IS NOT NULL AND n.description =~ $query_regex)
+           OR (n.full_name IS NOT NULL AND n.full_name =~ $query_regex)
         RETURN n, labels(n) as types
         LIMIT $limit
         """
+        # 准备正则表达式参数（不区分大小写）
+        query_regex = f"(?i).*{safe_query}.*"
         with self.driver.session() as session:
-            result = session.run(cypher, {"query": safe_query, "limit": limit})
-            nodes = [dict(record["n"], **{"type": record["types"][0]}) for record in result]
+            result = session.run(cypher, {"query_regex": query_regex, "limit": limit})
+            nodes = []
+            for record in result:
+                node_data = dict(record["n"])
+                # 处理labels，确保是字符串类型
+                types = record["types"]
+                if isinstance(types, list) and types:
+                    node_type = types[0]
+                else:
+                    node_type = str(types) if types else "Unknown"
+                node_data["type"] = node_type
+                nodes.append(node_data)
             
             # 缓存结果
             query_cache.cache_graph_data("keyword_search", nodes, ttl=1800, params={"query": query, "limit": limit})
@@ -131,7 +144,13 @@ class GraphRetriever:
                     if key in ["totalNodes", "totalRelationships"]:
                         stats[key] = result.single()["count"]
                     else:
-                        stats[key] = [record["types"][0] for record in result if record["types"]]
+                        stats[key] = []
+                        for record in result:
+                            types = record["types"]
+                            if isinstance(types, list) and types:
+                                stats[key].append(types[0])
+                            else:
+                                stats[key].append(str(types) if types else "Unknown")
                 except Exception as e:
                     logger.warning(f"获取统计信息 {key} 失败: {e}")
                     stats[key] = 0 if "total" in key else []
@@ -172,7 +191,18 @@ class GraphRetriever:
             
         with self.driver.session() as session:
             result = session.run(cypher, {"node_name": node_name})
-            neighbors = [dict(record["neighbor"], **{"type": record["types"][0], "distance": record["distance"]}) for record in result]
+            neighbors = []
+            for record in result:
+                neighbor_data = dict(record["neighbor"])
+                # 处理types，确保是字符串类型
+                types = record["types"]
+                if isinstance(types, list) and types:
+                    neighbor_type = types[0]
+                else:
+                    neighbor_type = str(types) if types else "Unknown"
+                neighbor_data["type"] = neighbor_type
+                neighbor_data["distance"] = record["distance"]
+                neighbors.append(neighbor_data)
             
             # 缓存结果
             query_cache.cache_graph_data("neighbors", neighbors, ttl=2400, params={"node_name": node_name, "depth": depth})

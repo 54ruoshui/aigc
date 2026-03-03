@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-GraphRAG Web应用启动脚本
-一键启动计算机网络知识图谱问答系统
+增强版GraphRAG Web应用启动脚本
+一键启动计算机网络知识图谱问答系统（带技能验证）
 """
 
 import os
@@ -10,6 +10,11 @@ import webbrowser
 import time
 from threading import Timer
 from dotenv import load_dotenv
+
+# 确保项目根目录在Python路径中
+project_root = os.path.dirname(os.path.abspath(__file__))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 # 加载环境变量
 load_dotenv()
@@ -58,6 +63,18 @@ def check_environment():
         return False
     
     print("✅ 环境配置检查通过")
+    
+    # 检查技能验证配置
+    enable_validation = os.getenv("ENABLE_SKILL_VALIDATION", "true").lower() == "true"
+    if enable_validation:
+        print("✅ 技能验证已启用")
+        print(f"   最小验证置信度: {os.getenv('MIN_VALIDATION_CONFIDENCE', '0.6')}")
+        print(f"   自动过滤无效项目: {os.getenv('AUTO_FILTER_INVALID', 'true')}")
+        print(f"   验证失败重试: {os.getenv('RETRY_ON_VALIDATION_FAILURE', 'true')}")
+        print(f"   反馈学习: {os.getenv('ENABLE_FEEDBACK_LEARNING', 'true')}")
+    else:
+        print("⚠️ 技能验证已禁用")
+    
     return True
 
 def open_browser():
@@ -68,8 +85,8 @@ def open_browser():
 def main():
     """主函数"""
     print("=" * 60)
-    print("🚀 GraphRAG Web应用启动器")
-    print("   计算机网络知识图谱问答系统")
+    print("🚀 增强版GraphRAG Web应用启动器")
+    print("   计算机网络知识图谱问答系统（带技能验证）")
     print("=" * 60)
     
     # 检查依赖
@@ -93,20 +110,13 @@ def main():
     Timer(2, open_browser).start()
     
     try:
-        # 导入并启动Flask应用
-        from web.graph_rag_web import app, init_rag_system
+        # 导入Web应用模块并调用其主函数
+        from web import graph_rag_web
         
-        # 初始化GraphRAG系统
-        print("🔧 正在初始化GraphRAG系统...")
-        init_rag_system()
+        print("🔧 正在初始化系统...")
         
-        # 启动Web应用
-        app.run(
-            host='0.0.0.0',
-            port=5000,
-            debug=True,
-            use_reloader=False  # 避免重复初始化
-        )
+        # 调用Web应用的主函数
+        graph_rag_web.main()
         
     except KeyboardInterrupt:
         print("\n👋 服务器已停止")
@@ -116,6 +126,7 @@ def main():
         print("1. Neo4j数据库是否正在运行")
         print("2. 网络连接是否正常")
         print("3. 环境变量是否正确配置")
+        print("4. 所有依赖是否正确安装")
         sys.exit(1)
 
 if __name__ == '__main__':

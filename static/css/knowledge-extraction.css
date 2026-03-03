@@ -1,0 +1,677 @@
+/**
+ * 知识点提取功能样式 - 与问答系统风格一致
+ */
+
+/* 标签页样式 */
+.nav-tabs .nav-link {
+    color: #6c757d;
+    border: 1px solid transparent;
+    border-bottom: none;
+    transition: all 0.3s ease;
+}
+
+.nav-tabs .nav-link:hover {
+    color: var(--primary-color);
+    border-color: transparent;
+}
+
+.nav-tabs .nav-link.active {
+    color: var(--primary-color);
+    background-color: #f8f9fa;
+    border-color: #dee2e6 #dee2e6 #fff;
+    border-bottom: 1px solid #dee2e6;
+    font-weight: bold;
+}
+
+/* 知识点提取卡片样式 - 与问答系统一致 */
+.extraction-card {
+    background: white;
+    border-radius: var(--border-radius);
+    box-shadow: var(--box-shadow);
+    padding: 2rem;
+    margin-bottom: 2rem;
+    transition: var(--transition);
+    position: relative;
+    overflow: hidden;
+}
+
+.extraction-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 4px;
+    height: 100%;
+    background: linear-gradient(to bottom, var(--primary-color), var(--secondary-color));
+    opacity: 0;
+    transition: var(--transition);
+}
+
+.extraction-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 15px 40px rgba(0,0,0,0.15);
+}
+
+.extraction-card:hover::before {
+    opacity: 1;
+}
+
+/* 文件上传区域 */
+#file-input {
+    border: 2px dashed #dee2e6;
+    border-radius: var(--border-radius);
+    padding: 20px;
+    text-align: center;
+    transition: all 0.3s ease;
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+}
+
+#file-input:hover {
+    border-color: var(--primary-color);
+    background: linear-gradient(135deg, #e7f3ff 0%, #f0f8ff 100%);
+    transform: translateY(-2px);
+}
+
+.drag-over {
+    background: linear-gradient(135deg, #e7f3ff 0%, #d0e8ff 100%) !important;
+    border-color: var(--primary-color) !important;
+    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.2);
+}
+
+/* 提取按钮样式 - 与问答系统一致 */
+.btn-extract {
+    background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+    border: none;
+    border-radius: 50px;
+    padding: 0.75rem 2rem;
+    font-weight: 600;
+    transition: var(--transition);
+    position: relative;
+    overflow: hidden;
+    color: white;
+    width: 100%;
+    margin-top: 1rem;
+}
+
+.btn-extract::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+    transition: left 0.5s;
+}
+
+.btn-extract:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+    color: white;
+}
+
+.btn-extract:hover::before {
+    left: 100%;
+}
+
+.btn-extract:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* 验证开关样式 */
+.validation-toggle {
+    display: flex;
+    align-items: center;
+    margin-bottom: 15px;
+    padding: 15px;
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-radius: var(--border-radius);
+    border: 1px solid #e9ecef;
+}
+
+.validation-toggle .switch {
+    position: relative;
+    display: inline-block;
+    width: 50px;
+    height: 24px;
+    margin-right: 10px;
+}
+
+.validation-toggle .switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.validation-toggle .slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #ccc;
+    transition: .4s;
+    border-radius: 24px;
+}
+
+.validation-toggle .slider:before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: .4s;
+    border-radius: 50%;
+}
+
+.validation-toggle input:checked + .slider {
+    background-color: var(--primary-color);
+}
+
+.validation-toggle input:checked + .slider:before {
+    transform: translateX(26px);
+}
+
+.validation-info {
+    margin-left: 10px;
+    color: #6c757d;
+    font-size: 0.9em;
+}
+
+/* 结果卡片样式 */
+.results-card {
+    background: white;
+    border-radius: var(--border-radius);
+    box-shadow: var(--box-shadow);
+    padding: 2rem;
+    margin-bottom: 2rem;
+    border-left: 4px solid var(--success-color);
+    display: none;
+}
+
+.results-card.show {
+    display: block;
+    animation: fadeIn 0.5s ease-out;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* 统计卡片样式 - 与问答系统一致 */
+.extraction-stats-card {
+    background: white;
+    border-radius: 15px;
+    padding: 1.5rem;
+    text-align: center;
+    box-shadow: var(--box-shadow);
+    margin-bottom: 1rem;
+    transition: var(--transition);
+    position: relative;
+    overflow: hidden;
+}
+
+.extraction-stats-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
+}
+
+.extraction-stats-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 15px 30px rgba(0,0,0,0.15);
+}
+
+.extraction-stats-number {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: var(--primary-color);
+    margin-bottom: 0.5rem;
+}
+
+/* 知识点提取结果样式 */
+.keyword-type-group {
+    border-left: 4px solid var(--primary-color);
+    padding-left: 15px;
+    margin-bottom: 20px;
+}
+
+.keyword-item {
+    background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
+    border: 1px solid #e9ecef;
+    border-radius: var(--border-radius);
+    padding: 15px;
+    margin-bottom: 10px;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.keyword-item::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(102, 126, 234, 0.05), transparent);
+    transition: left 0.3s;
+}
+
+.keyword-item:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 25px rgba(102, 126, 234, 0.2);
+    border-color: var(--primary-color);
+}
+
+.keyword-item:hover::before {
+    left: 100%;
+}
+
+.keyword-item.valid {
+    border-left: 4px solid var(--success-color);
+    background: linear-gradient(135deg, #f8fff9 0%, #ffffff 100%);
+}
+
+.keyword-item.invalid {
+    border-left: 4px solid var(--danger-color);
+    background: linear-gradient(135deg, #fff8f8 0%, #ffffff 100%);
+}
+
+.keyword-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.keyword-name {
+    font-weight: bold;
+    color: var(--primary-color);
+    font-size: 1.1rem;
+}
+
+.keyword-type {
+    background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+    color: white;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 0.8em;
+    font-weight: 600;
+}
+
+.keyword-confidence {
+    font-size: 0.85em;
+    color: #6c757d;
+    background-color: #e9ecef;
+    padding: 4px 8px;
+    border-radius: 20px;
+    font-weight: 600;
+}
+
+.keyword-description {
+    color: #495057;
+    font-size: 0.9em;
+    margin-top: 8px;
+    padding: 8px;
+    background-color: #f8f9fa;
+    border-radius: 8px;
+}
+
+.validation-icon {
+    margin-left: auto;
+    font-size: 1.2em;
+}
+
+.validation-details {
+    margin-top: 8px;
+    padding: 8px;
+    background-color: #f8f9fa;
+    border-radius: 8px;
+    font-size: 0.9em;
+    border-left: 3px solid var(--info-color);
+}
+
+.validation-suggestions {
+    margin-top: 5px;
+    color: #6c757d;
+    font-style: italic;
+}
+
+/* 关系样式 */
+.relationship-item {
+    background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
+    border: 1px solid #e9ecef;
+    border-radius: var(--border-radius);
+    padding: 15px;
+    margin-bottom: 12px;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.relationship-item::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(102, 126, 234, 0.05), transparent);
+    transition: left 0.3s;
+}
+
+.relationship-item:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 25px rgba(102, 126, 234, 0.2);
+    border-color: var(--primary-color);
+}
+
+.relationship-item:hover::before {
+    left: 100%;
+}
+
+.relationship-item.valid {
+    border-left: 4px solid var(--success-color);
+    background: linear-gradient(135deg, #f8fff9 0%, #ffffff 100%);
+}
+
+.relationship-item.invalid {
+    border-left: 4px solid var(--danger-color);
+    background: linear-gradient(135deg, #fff8f8 0%, #ffffff 100%);
+}
+
+.relationship-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+}
+
+.relationship-source,
+.relationship-target {
+    font-weight: bold;
+    color: #495057;
+    background-color: #e9ecef;
+    padding: 6px 12px;
+    border-radius: 20px;
+}
+
+.relationship-type {
+    color: white;
+    background: linear-gradient(135deg, var(--secondary-color) 0%, var(--primary-color) 100%);
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: bold;
+}
+
+.relationship-confidence {
+    font-size: 0.85em;
+    color: #6c757d;
+    background-color: #e9ecef;
+    padding: 4px 8px;
+    border-radius: 20px;
+    font-weight: 600;
+}
+
+.relationship-description {
+    color: #495057;
+    font-size: 0.9em;
+    margin-top: 8px;
+    padding: 8px;
+    background-color: #f8f9fa;
+    border-radius: 8px;
+}
+
+/* 加载动画 - 与问答系统一致 */
+.loading {
+    display: none;
+    text-align: center;
+    padding: 3rem;
+    background: white;
+    border-radius: var(--border-radius);
+    box-shadow: var(--box-shadow);
+}
+
+.spinner {
+    border: 4px solid #f3f3f3;
+    border-top: 4px solid var(--primary-color);
+    border-radius: 50%;
+    width: 60px;
+    height: 60px;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 1.5rem;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* 反馈区域样式 */
+.feedback-section {
+    margin-top: 20px;
+    padding: 20px;
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-radius: var(--border-radius);
+    border: 1px solid #e9ecef;
+}
+
+.feedback-buttons {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 15px;
+    flex-wrap: wrap;
+}
+
+.feedback-form textarea {
+    width: 100%;
+    min-height: 100px;
+    margin-bottom: 10px;
+    border: 1px solid #dee2e6;
+    border-radius: var(--border-radius);
+    padding: 10px;
+    font-family: inherit;
+}
+
+.feedback-form textarea:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+    outline: none;
+}
+
+/* 验证统计样式 */
+.validation-stats {
+    margin-top: 20px;
+    padding: 20px;
+    background: linear-gradient(135deg, #e9ecef 0%, #f8f9fa 100%);
+    border-radius: var(--border-radius);
+    border: 1px solid #dee2e6;
+}
+
+.validation-metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+    margin-bottom: 15px;
+}
+
+.metric {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 15px;
+    background-color: white;
+    border-radius: var(--border-radius);
+    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+    transition: all 0.3s ease;
+}
+
+.metric:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+}
+
+.metric-label {
+    font-weight: bold;
+    color: #495057;
+}
+
+.metric-value {
+    color: var(--primary-color);
+    font-weight: 600;
+    font-size: 1.1rem;
+}
+
+/* 提取摘要样式 */
+.extraction-summary {
+    margin-bottom: 25px;
+    padding: 20px;
+    background: linear-gradient(135deg, #e9ecef 0%, #f8f9fa 100%);
+    border-radius: var(--border-radius);
+    border: 1px solid #dee2e6;
+}
+
+.summary-info p {
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+}
+
+.summary-info strong {
+    color: var(--primary-color);
+    margin-right: 8px;
+}
+
+.explanation {
+    color: #6c757d;
+    font-style: italic;
+    margin-top: 10px;
+    padding: 10px;
+    background-color: rgba(102, 126, 234, 0.05);
+    border-radius: 8px;
+    border-left: 3px solid var(--info-color);
+}
+
+/* 各部分样式 */
+.stats-section, .validation-section, .keywords-section, .relationships-section {
+    margin-bottom: 25px;
+    padding: 20px;
+    background: white;
+    border: 1px solid #dee2e6;
+    border-radius: var(--border-radius);
+    box-shadow: var(--box-shadow);
+}
+
+.stats-section h4, .validation-section h4, .keywords-section h4, .relationships-section h4 {
+    color: var(--primary-color);
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #e9ecef;
+}
+
+.stats-grid, .validation-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 15px;
+}
+
+.stat-item, .validation-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 15px;
+    background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
+    border-radius: var(--border-radius);
+    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+    transition: all 0.3s ease;
+}
+
+.stat-item:hover, .validation-item:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+}
+
+.stat-label, .validation-label {
+    font-weight: bold;
+    color: #495057;
+}
+
+.stat-value, .validation-value {
+    color: var(--primary-color);
+    font-weight: 600;
+}
+
+.keywords-list, .relationships-list {
+    max-height: 400px;
+    overflow-y: auto;
+    padding-right: 10px;
+}
+
+/* 成功消息样式 */
+.alert-success {
+    background: linear-gradient(135deg, #d1e7dd 0%, #c3e6cb 100%);
+    border-color: #badbcc;
+    color: #0f5132;
+    padding: 15px 20px;
+    border-radius: var(--border-radius);
+    margin-top: 15px;
+    border-left: 4px solid var(--success-color);
+}
+
+/* 响应式调整 */
+@media (max-width: 768px) {
+    .validation-toggle {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+    
+    .feedback-buttons {
+        flex-direction: column;
+    }
+    
+    .validation-metrics {
+        grid-template-columns: 1fr;
+    }
+    
+    .stats-grid, .validation-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .relationship-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+    
+    .relationship-source,
+    .relationship-target,
+    .relationship-type {
+        margin-bottom: 5px;
+        width: 100%;
+        text-align: center;
+    }
+    
+    .keyword-header {
+        flex-wrap: wrap;
+    }
+}
