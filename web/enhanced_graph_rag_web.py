@@ -94,7 +94,7 @@ def init_rag_system():
             neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
             neo4j_user = os.getenv("NEO4J_USER", "neo4j")
             neo4j_password = os.getenv("NEO4J_PASSWORD", "aixi1314")
-            api_key = os.getenv("ZHIPUAI_API_KEY", "your-zhipuai-api-key")
+            api_key = os.getenv("ZHIPUAI_API_KEY", "")
             api_model = os.getenv("ZHIPUAI_MODEL", "glm-4-flash")
             
             config = GraphRAGConfig(
@@ -133,7 +133,7 @@ def init_knowledge_extractor():
         neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
         neo4j_user = os.getenv("NEO4J_USER", "neo4j")
         neo4j_password = os.getenv("NEO4J_PASSWORD", "aixi1314")
-        api_key = os.getenv("ZHIPUAI_API_KEY", "your-zhipuai-api-key")
+        api_key = os.getenv("ZHIPUAI_API_KEY", "")
         api_model = os.getenv("ZHIPUAI_MODEL", "glm-4-flash")
         
         config = KnowledgeExtractionConfig(
@@ -164,7 +164,7 @@ def init_enhanced_knowledge_extractor():
         neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
         neo4j_user = os.getenv("NEO4J_USER", "neo4j")
         neo4j_password = os.getenv("NEO4J_PASSWORD", "aixi1314")
-        api_key = os.getenv("ZHIPUAI_API_KEY", "your-zhipuai-api-key")
+        api_key = os.getenv("ZHIPUAI_API_KEY", "")
         api_model = os.getenv("ZHIPUAI_MODEL", "glm-4-flash")
         
         # 检查是否启用验证
@@ -287,15 +287,21 @@ def extract_knowledge():
         # 处理内容并保存到Neo4j
         logger.info(f"🔄 开始提取知识点，内容长度: {len(content)} 字符")
         logger.info(f"📊 使用{'增强版' if use_enhanced else '基础版'}提取器")
+        logger.info(f"🔍 技能验证状态: {'启用' if use_validation else '禁用'}")
         
-        if use_enhanced and use_validation:
+        if use_enhanced:
             # 使用增强版提取器（带验证）
-            result = enhanced_extractor.process_course_content_with_validation(content, save_to_graph=True)
+            result = enhanced_extractor.process_course_content_with_validation(content, save_to_graph=True, use_validation=use_validation)
             
             # 添加验证统计信息
             validation_stats = result.get('validation_stats', {})
-            valid_keywords = [kw for kw in result.get('keywords', []) if kw.get('validation', {}).get('is_valid', False)]
-            valid_relationships = [rel for rel in result.get('relationships', []) if rel.get('validation', {}).get('is_valid', False)]
+            # 修复有效性判断逻辑：当验证被禁用时，所有项目都视为有效
+            if use_validation:
+                valid_keywords = [kw for kw in result.get('keywords', []) if kw.get('validation', {}).get('is_valid', False)]
+                valid_relationships = [rel for rel in result.get('relationships', []) if rel.get('validation', {}).get('is_valid', False)]
+            else:
+                valid_keywords = result.get('keywords', [])
+                valid_relationships = result.get('relationships', [])
             
             # 构建详细消息
             message_parts = []

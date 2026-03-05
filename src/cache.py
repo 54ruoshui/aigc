@@ -1,6 +1,7 @@
 """
-缓存模块
-提供查询结果缓存功能，提高系统响应速度
+Cache module
+Provides query result caching functionality to improve system response speed
+Core implementation of LRU (Least Recently Used) cache strategy, supporting TTL (Time To Live), thread safety, cache statistics, etc.
 """
 
 import time
@@ -8,21 +9,28 @@ import hashlib
 import json
 from typing import Any, Optional, Dict
 from dataclasses import dataclass
-import threading
+import threading     # Used for thread locks to ensure cache operation safety in multi-threaded environments
 
 @dataclass
 class CacheEntry:
-    """缓存条目"""
+    """Cache entry"""
     value: Any
-    timestamp: float
-    ttl: int
+    timestamp: float    # Current timestamp
+    ttl: int    # Expiration time
     
     def is_expired(self) -> bool:
-        """检查是否过期"""
+        """Check if expired"""
         return time.time() - self.timestamp > self.ttl
 
 class LRUCache:
-    """LRU缓存实现"""
+    """
+    LRU (Least Recently Used) cache core implementation class
+    Core features:
+    1. Evicts least recently used cache entries based on access order
+    2. Supports automatic cleanup of expired cache entries (TTL)
+    3. Thread safe (implemented through RLock)
+    4. Limits maximum cache capacity to prevent memory overflow
+    """
     
     def __init__(self, max_size: int = 1000):
         self.max_size = max_size

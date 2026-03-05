@@ -61,93 +61,41 @@ class EnhancedKnowledgeExtraction {
             return;
         }
 
-        // 添加验证开关
-        const extractionArea = document.querySelector('.extraction-area');
-        if (extractionArea) {
-            const validationToggle = document.createElement('div');
-            validationToggle.className = 'validation-toggle';
-            validationToggle.innerHTML = `
-                <label class="switch">
-                    <input type="checkbox" id="use-validation" checked>
-                    <span class="slider"></span>
-                </label>
-                <span>启用技能验证</span>
-                <small class="validation-info">自动过滤无效知识点和关系</small>
-            `;
-            
-            // 插入到提取按钮之前
-            const extractBtn = document.getElementById('extract-btn');
-            if (extractBtn) {
-                extractionArea.insertBefore(validationToggle, extractBtn);
-            }
+        // 验证开关已在HTML中定义，不需要重复创建
+        // 只需确保验证开关的可见性
+        const validationToggle = document.querySelector('.validation-toggle');
+        if (validationToggle) {
+            validationToggle.style.display = 'flex';
         }
     }
 
     setupFeedbackFeatures() {
         if (!this.validationEnabled) return;
 
-        // 添加反馈按钮到结果区域
-        const resultsContainer = document.getElementById('extraction-results');
-        if (resultsContainer) {
-            const feedbackSection = document.createElement('div');
-            feedbackSection.className = 'feedback-section validation-only';
-            feedbackSection.innerHTML = `
-                <h4>反馈与改进</h4>
-                <p>帮助系统学习，提高提取质量</p>
-                <div class="feedback-buttons">
-                    <button class="btn btn-success" id="feedback-correct">全部正确</button>
-                    <button class="btn btn-warning" id="feedback-partial">部分正确</button>
-                    <button class="btn btn-danger" id="feedback-incorrect">需要修正</button>
-                </div>
-                <div class="feedback-form" style="display: none;">
-                    <textarea id="feedback-correction" placeholder="请描述需要修正的内容..."></textarea>
-                    <button class="btn btn-primary" id="submit-feedback">提交反馈</button>
-                </div>
-            `;
-            
-            resultsContainer.appendChild(feedbackSection);
-            
-            // 绑定反馈事件
-            this.bindFeedbackEvents();
-        }
+        // 反馈区域会在displayResults方法中动态添加到结果中
+        // 这里不需要预先创建，避免重复
     }
 
     setupValidationStats() {
         if (!this.validationEnabled) return;
 
-        // 添加验证统计显示区域
-        const statsContainer = document.querySelector('.stats-container');
-        if (statsContainer) {
-            const validationStats = document.createElement('div');
-            validationStats.className = 'validation-stats validation-only';
-            validationStats.innerHTML = `
-                <h4>验证统计</h4>
-                <div class="validation-metrics">
-                    <div class="metric">
-                        <span class="metric-label">验证通过率:</span>
-                        <span class="metric-value" id="validity-rate">-</span>
-                    </div>
-                    <div class="metric">
-                        <span class="metric-label">总验证数:</span>
-                        <span class="metric-value" id="total-validations">-</span>
-                    </div>
-                    <div class="metric">
-                        <span class="metric-label">平均置信度:</span>
-                        <span class="metric-value" id="avg-confidence">-</span>
-                    </div>
-                </div>
-                <button class="btn btn-sm btn-secondary" id="refresh-stats">刷新统计</button>
-            `;
+        // 验证统计区域已在HTML中定义，不需要重复创建
+        // 只需确保统计区域的可见性并绑定事件
+        const validationStats = document.querySelector('.validation-stats');
+        if (validationStats) {
+            validationStats.style.display = 'block';
             
-            statsContainer.appendChild(validationStats);
-            
-            // 绑定刷新统计事件
-            document.getElementById('refresh-stats').addEventListener('click', () => {
+            // 绑定刷新统计事件（如果尚未绑定）
+            const refreshBtn = document.getElementById('refresh-stats');
+            if (refreshBtn && !refreshBtn.hasAttribute('data-listener')) {
+                refreshBtn.setAttribute('data-listener', 'true');
+                refreshBtn.addEventListener('click', () => {
+                    this.loadValidationStats();
+                });
+                
+                // 初始加载统计
                 this.loadValidationStats();
-            });
-            
-            // 初始加载统计
-            this.loadValidationStats();
+            }
         }
     }
 
@@ -259,6 +207,25 @@ class EnhancedKnowledgeExtraction {
             html += this.buildRelationshipsHTML(result);
         }
 
+        // 如果启用了验证，添加反馈区域
+        if (this.validationEnabled) {
+            html += `
+                <div class="feedback-section validation-only">
+                    <h4>反馈与改进</h4>
+                    <p>帮助系统学习，提高提取质量</p>
+                    <div class="feedback-buttons">
+                        <button class="btn btn-success" id="feedback-correct">全部正确</button>
+                        <button class="btn btn-warning" id="feedback-partial">部分正确</button>
+                        <button class="btn btn-danger" id="feedback-incorrect">需要修正</button>
+                    </div>
+                    <div class="feedback-form" style="display: none;">
+                        <textarea id="feedback-correction" placeholder="请描述需要修正的内容..."></textarea>
+                        <button class="btn btn-primary" id="submit-feedback">提交反馈</button>
+                    </div>
+                </div>
+            `;
+        }
+
         resultsContainer.innerHTML = html;
         
         // 显示结果卡片并添加动画效果
@@ -266,7 +233,7 @@ class EnhancedKnowledgeExtraction {
             resultsCard.classList.add('show');
         }
         
-        // 重新绑定反馈事件（因为DOM已更新）
+        // 绑定反馈事件（因为DOM已更新）
         if (this.validationEnabled) {
             this.bindFeedbackEvents();
         }
@@ -344,8 +311,9 @@ class EnhancedKnowledgeExtraction {
         `;
 
         keywords.forEach((keyword, index) => {
-            const isValid = validKeywords.includes(keyword);
+            // 修复有效性判断逻辑
             const validation = keyword.validation || {};
+            const isValid = this.validationEnabled ? validation.is_valid : true;
             const validationClass = this.validationEnabled ? (isValid ? 'valid' : 'invalid') : '';
             const validationIcon = this.validationEnabled ? (isValid ? '<i class="fas fa-check-circle text-success"></i>' : '<i class="fas fa-times-circle text-danger"></i>') : '';
             
@@ -391,8 +359,9 @@ class EnhancedKnowledgeExtraction {
         `;
 
         relationships.forEach((rel, index) => {
-            const isValid = validRelationships.includes(rel);
+            // 修复有效性判断逻辑
             const validation = rel.validation || {};
+            const isValid = this.validationEnabled ? validation.is_valid : true;
             const validationClass = this.validationEnabled ? (isValid ? 'valid' : 'invalid') : '';
             const validationIcon = this.validationEnabled ? (isValid ? '<i class="fas fa-check-circle text-success"></i>' : '<i class="fas fa-times-circle text-danger"></i>') : '';
             

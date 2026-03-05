@@ -18,7 +18,7 @@ class GraphRAGConfig:
     neo4j_database: str = os.getenv("NEO4J_DATABASE", "neo4j")
     
     # 智谱AI配置
-    openai_api_key: str = os.getenv("ZHIPUAI_API_KEY", "your-zhipuai-api-key")
+    openai_api_key: str = os.getenv("ZHIPUAI_API_KEY", "")
     openai_model: str = os.getenv("ZHIPUAI_MODEL", "glm-4-flash")
     openai_base_url: str = os.getenv("ZHIPUAI_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
     

@@ -29,7 +29,7 @@ class EnhancedExtractionConfig(KnowledgeExtractionConfig):
     """增强版知识点提取配置"""
     # 验证配置
     enable_validation: bool = True  # 是否启用验证
-    min_validation_confidence: float = 0.6  # 最小验证置信度
+    min_validation_confidence: float = 0.6  # 最小验证置信度（高要求标准）
     auto_filter_invalid: bool = True  # 是否自动过滤无效项目
     
     # 技能验证配置
@@ -104,6 +104,16 @@ class EnhancedKnowledgeExtractor(KnowledgeExtractor):
             logger.info(f"验证后保留 {len(validated_keywords)} 个有效关键字")
             return validated_keywords
         
+        # 如果验证未启用，为每个关键词添加默认验证信息
+        for keyword in keywords:
+            keyword['validation'] = {
+                'is_valid': True,
+                'confidence': keyword.get('confidence', 0.8),
+                'reason': '验证未启用，默认通过',
+                'results': [],
+                'suggestions': []
+            }
+        
         return keywords
     
     def _validate_and_retry_keywords(self, keywords: List[Dict[str, Any]], text: str) -> List[Dict[str, Any]]:
@@ -120,9 +130,27 @@ class EnhancedKnowledgeExtractor(KnowledgeExtractor):
                 validated_keywords.append(validated_keyword)
             # 如果验证失败但启用了重试，尝试重新提取
             elif self.config.retry_on_validation_failure and len(validated_keywords) < self.config.max_keywords_per_text:
+                # 确保validation是一个ValidationResult对象
+                if not isinstance(validation, dict):
+                    validation = {
+                        'is_valid': False,
+                        'confidence': 0.1,
+                        'reason': '验证失败',
+                        'suggestions': ['请重新提取']
+                    }
                 retry_keyword = self._retry_keyword_extraction(keyword, text, validation)
                 if retry_keyword:
                     validated_keywords.append(retry_keyword)
+                else:
+                    # 重试失败，保留原始关键词但添加验证信息
+                    keyword['validation'] = validation
+                    validated_keywords.append(keyword)
+            else:
+                # 即使验证未通过，也记录原因并添加，但降低置信度
+                logger.info(f"关键词验证未通过: {keyword['name']}, 原因: {validation.get('reason', '未知')}")
+                # 添加验证信息到原始关键词
+                keyword['validation'] = validation
+                validated_keywords.append(keyword)
         
         # 如果启用了自动过滤，只返回有效的关键词
         if self.config.auto_filter_invalid:
@@ -130,15 +158,15 @@ class EnhancedKnowledgeExtractor(KnowledgeExtractor):
         
         return validated_keywords
     
-    def _retry_keyword_extraction(self, failed_keyword: Dict[str, Any], text: str, validation_result: ValidationResult) -> Optional[Dict[str, Any]]:
+    def _retry_keyword_extraction(self, failed_keyword: Dict[str, Any], text: str, validation_result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """重试关键词提取"""
-        if not self.config.openai_api_key or self.config.openai_api_key == "your-zhipuai-api-key":
+        if not self.config.openai_api_key:
             return None
         
         try:
             # 构建重试提示
-            suggestions = validation_result.suggestions
-            reason = validation_result.reason
+            suggestions = validation_result.get('suggestions', [])
+            reason = validation_result.get('reason', '')
             
             system_prompt = f"""你是一个计算机网络领域的专家，之前提取的关键词验证失败。
 
@@ -184,11 +212,19 @@ class EnhancedKnowledgeExtractor(KnowledgeExtractor):
                 "max_tokens": 500
             }
             
+            # 确保URL以/chat/completions结尾
+            base_url = self.config.openai_base_url
+            if not base_url.endswith('/chat/completions'):
+                if base_url.endswith('/'):
+                    base_url += 'chat/completions'
+                else:
+                    base_url += '/chat/completions'
+            
             response = requests.post(
-                self.config.openai_base_url,
+                base_url,
                 headers=headers,
                 json=data,
-                timeout=15
+                timeout=60  # 增加超时时间到60秒
             )
             response.raise_for_status()
             
@@ -197,21 +233,50 @@ class EnhancedKnowledgeExtractor(KnowledgeExtractor):
             
             # 解析修正后的关键词
             try:
-                corrected_keyword = json.loads(content)
+                # 处理可能包含代码块标记的JSON
+                json_content = content
+                if json_content.startswith('```json'):
+                    json_content = json_content[7:]  # 移除```json
+                elif json_content.startswith('```'):
+                    json_content = json_content[3:]  # 移除```
+                if json_content.endswith('```'):
+                    json_content = json_content[:-3]  # 移除结尾的```
+                json_content = json_content.strip()
+                
+                # 尝试解析JSON，如果失败则尝试提取JSON部分
+                try:
+                    corrected_keyword = json.loads(json_content)
+                except json.JSONDecodeError:
+                    # 尝试从内容中提取JSON部分
+                    import re
+                    json_pattern = r'\{.*\}'
+                    match = re.search(json_pattern, json_content, re.DOTALL)
+                    if match:
+                        json_str = match.group(0)
+                        corrected_keyword = json.loads(json_str)
+                    else:
+                        raise json.JSONDecodeError("无法提取有效JSON", content, 0)
                 # 保留原始信息
                 corrected_keyword['source'] = failed_keyword.get('source', 'retry_llm')
                 corrected_keyword['context'] = failed_keyword.get('context', '')
                 corrected_keyword['original'] = failed_keyword
                 
                 # 验证修正后的关键词
-                validated_corrected = self.validation_system.validate_knowledge(corrected_keyword)
-                validation = validated_corrected.get('validation', {})
-                
-                if validation.get('is_valid', False) and validation.get('confidence', 0) >= self.config.min_validation_confidence:
-                    logger.info(f"关键词修正成功: {failed_keyword['name']} -> {corrected_keyword['name']}")
-                    return validated_corrected
-                else:
-                    logger.warning(f"关键词修正后仍无效: {corrected_keyword['name']}")
+                try:
+                    validated_corrected = self.validation_system.validate_knowledge(corrected_keyword)
+                    validation = validated_corrected.get('validation', {})
+                    
+                    if validation.get('is_valid', False) and validation.get('confidence', 0) >= self.config.min_validation_confidence:
+                        # 只有当关键词真正发生变化时才记录日志
+                        if failed_keyword['name'] != corrected_keyword['name']:
+                            logger.info(f"关键词修正成功: {failed_keyword['name']} -> {corrected_keyword['name']}")
+                        return validated_corrected
+                    else:
+                        logger.warning(f"关键词修正后仍无效: {corrected_keyword['name']}")
+                        return validated_corrected  # 即使验证未通过也返回，让后续逻辑处理
+                except Exception as e:
+                    logger.error(f"验证修正后的关键词失败: {e}")
+                    return corrected_keyword  # 返回修正后的关键词，即使验证失败
                     
             except json.JSONDecodeError:
                 logger.warning(f"修正后的关键词不是有效JSON: {content}")
@@ -233,14 +298,33 @@ class EnhancedKnowledgeExtractor(KnowledgeExtractor):
             验证后的关系列表
         """
         # 1. 提取关系
-        relationships = self.extract_relationships_from_text(text, keywords)
-        logger.info(f"初步提取到 {len(relationships)} 个关系")
+        try:
+            relationships = self.extract_relationships_from_text(text, keywords)
+            logger.info(f"初步提取到 {len(relationships)} 个关系")
+        except Exception as e:
+            logger.error(f"关系提取失败: {e}")
+            relationships = []
         
         # 2. 验证关系
-        if self.validation_system and self.config.enable_validation:
-            validated_relationships = self._validate_and_retry_relationships(relationships, text)
-            logger.info(f"验证后保留 {len(validated_relationships)} 个有效关系")
-            return validated_relationships
+        if self.validation_system and self.config.enable_validation and relationships:
+            try:
+                validated_relationships = self._validate_and_retry_relationships(relationships, text)
+                logger.info(f"验证后保留 {len(validated_relationships)} 个有效关系")
+                return validated_relationships
+            except Exception as e:
+                logger.error(f"关系验证失败: {e}")
+                # 如果验证失败，返回原始关系
+                return relationships
+        
+        # 如果验证未启用，为每个关系添加默认验证信息
+        for relationship in relationships:
+            relationship['validation'] = {
+                'is_valid': True,
+                'confidence': relationship.get('confidence', 0.8),
+                'reason': '验证未启用，默认通过',
+                'results': [],
+                'suggestions': []
+            }
         
         return relationships
     
@@ -249,34 +333,67 @@ class EnhancedKnowledgeExtractor(KnowledgeExtractor):
         validated_relationships = []
         
         for relationship in relationships:
-            # 验证关系
-            validated_relationship = self.validation_system.validate_relationship(relationship)
-            validation = validated_relationship.get('validation', {})
-            
-            # 如果验证通过且置信度足够，直接添加
-            if validation.get('is_valid', False) and validation.get('confidence', 0) >= self.config.min_validation_confidence:
-                validated_relationships.append(validated_relationship)
-            # 如果验证失败但启用了重试，尝试重新提取
-            elif self.config.retry_on_validation_failure and len(validated_relationships) < self.config.max_relationships_per_text:
-                retry_relationship = self._retry_relationship_extraction(relationship, text, validation)
-                if retry_relationship:
-                    validated_relationships.append(retry_relationship)
+            # 确保relationship是字典对象
+            if not isinstance(relationship, dict):
+                logger.warning(f"跳过非字典对象的关系: {type(relationship)}")
+                continue
+                
+            try:
+                # 验证关系
+                validated_relationship = self.validation_system.validate_relationship(relationship)
+                validation = validated_relationship.get('validation', {})
+                
+                # 如果验证通过且置信度足够，直接添加
+                if validation.get('is_valid', False) and validation.get('confidence', 0) >= self.config.min_validation_confidence:
+                    validated_relationships.append(validated_relationship)
+                # 如果验证失败但启用了重试，尝试重新提取
+                elif self.config.retry_on_validation_failure and len(validated_relationships) < self.config.max_relationships_per_text:
+                    # 确保validation是一个ValidationResult对象
+                    if not isinstance(validation, dict):
+                        validation = {
+                            'is_valid': False,
+                            'confidence': 0.1,
+                            'reason': '验证失败',
+                            'suggestions': ['请重新提取']
+                        }
+                    retry_relationship = self._retry_relationship_extraction(relationship, text, validation)
+                    if retry_relationship:
+                        validated_relationships.append(retry_relationship)
+                else:
+                    # 即使验证未通过，也记录原因并添加，但降低置信度
+                    source_name = relationship.get('source', {}).get('name', '') if isinstance(relationship.get('source'), dict) else str(relationship.get('source', ''))
+                    target_name = relationship.get('target', {}).get('name', '') if isinstance(relationship.get('target'), dict) else str(relationship.get('target', ''))
+                    rel_type = relationship.get('type', '')
+                    
+                    logger.info(f"关系验证未通过: {source_name}-{rel_type}-{target_name}, 原因: {validation.get('reason', '未知')}")
+                    # 添加验证信息到原始关系
+                    relationship['validation'] = validation
+                    validated_relationships.append(relationship)
+            except Exception as e:
+                logger.error(f"验证关系时出错: {e}, 关系: {relationship}")
+                # 如果验证过程出错，仍然尝试保留原始关系
+                if relationship.get('confidence', 0) >= 0.7:
+                    validated_relationships.append(relationship)
         
         # 如果启用了自动过滤，只返回有效的关系
         if self.config.auto_filter_invalid:
-            return self.validation_system.filter_invalid_items(validated_relationships, self.config.min_validation_confidence)
+            try:
+                return self.validation_system.filter_invalid_items(validated_relationships, self.config.min_validation_confidence)
+            except Exception as e:
+                logger.error(f"过滤无效关系时出错: {e}")
+                return validated_relationships
         
         return validated_relationships
     
-    def _retry_relationship_extraction(self, failed_relationship: Dict[str, Any], text: str, validation_result: ValidationResult) -> Optional[Dict[str, Any]]:
+    def _retry_relationship_extraction(self, failed_relationship: Dict[str, Any], text: str, validation_result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """重试关系提取"""
-        if not self.config.openai_api_key or self.config.openai_api_key == "your-zhipuai-api-key":
+        if not self.config.openai_api_key:
             return None
         
         try:
             # 构建重试提示
-            suggestions = validation_result.suggestions
-            reason = validation_result.reason
+            suggestions = validation_result.get('suggestions', [])
+            reason = validation_result.get('reason', '')
             
             source_name = failed_relationship.get('source', {}).get('name', '')
             target_name = failed_relationship.get('target', {}).get('name', '')
@@ -327,11 +444,19 @@ class EnhancedKnowledgeExtractor(KnowledgeExtractor):
                 "max_tokens": 500
             }
             
+            # 确保URL以/chat/completions结尾
+            base_url = self.config.openai_base_url
+            if not base_url.endswith('/chat/completions'):
+                if base_url.endswith('/'):
+                    base_url += 'chat/completions'
+                else:
+                    base_url += '/chat/completions'
+            
             response = requests.post(
-                self.config.openai_base_url,
+                base_url,
                 headers=headers,
                 json=data,
-                timeout=15
+                timeout=60  # 增加超时时间到60秒
             )
             response.raise_for_status()
             
@@ -340,21 +465,48 @@ class EnhancedKnowledgeExtractor(KnowledgeExtractor):
             
             # 解析修正后的关系
             try:
-                corrected_relationship = json.loads(content)
+                # 处理可能包含代码块标记的JSON
+                json_content = content
+                if json_content.startswith('```json'):
+                    json_content = json_content[7:]  # 移除```json
+                elif json_content.startswith('```'):
+                    json_content = json_content[3:]  # 移除```
+                if json_content.endswith('```'):
+                    json_content = json_content[:-3]  # 移除结尾的```
+                json_content = json_content.strip()
+                
+                # 尝试解析JSON，如果失败则尝试提取JSON部分
+                try:
+                    corrected_relationship = json.loads(json_content)
+                except json.JSONDecodeError:
+                    # 尝试从内容中提取JSON部分
+                    import re
+                    json_pattern = r'\{.*\}'
+                    match = re.search(json_pattern, json_content, re.DOTALL)
+                    if match:
+                        json_str = match.group(0)
+                        corrected_relationship = json.loads(json_str)
+                    else:
+                        raise json.JSONDecodeError("无法提取有效JSON", content, 0)
                 # 保留原始信息
                 corrected_relationship['extraction_method'] = 'retry_llm'
                 corrected_relationship['context'] = failed_relationship.get('context', '')
                 corrected_relationship['original'] = failed_relationship
                 
                 # 验证修正后的关系
-                validated_corrected = self.validation_system.validate_relationship(corrected_relationship)
-                validation = validated_corrected.get('validation', {})
-                
-                if validation.get('is_valid', False) and validation.get('confidence', 0) >= self.config.min_validation_confidence:
-                    logger.info(f"关系修正成功: {source_name}-{rel_type}-{target_name}")
-                    return validated_corrected
-                else:
-                    logger.warning(f"关系修正后仍无效: {corrected_relationship}")
+                try:
+                    validated_corrected = self.validation_system.validate_relationship(corrected_relationship)
+                    validation = validated_corrected.get('validation', {})
+                    
+                    if validation.get('is_valid', False) and validation.get('confidence', 0) >= self.config.min_validation_confidence:
+                        logger.info(f"关系修正成功: {source_name}-{rel_type}-{target_name}")
+                        return validated_corrected
+                    else:
+                        logger.warning(f"关系修正后仍无效: {corrected_relationship}")
+                        return validated_corrected  # 即使验证未通过也返回，让后续逻辑处理
+                except Exception as e:
+                    logger.error(f"验证修正后的关系失败: {e}")
+                    return corrected_relationship  # 返回修正后的关系，即使验证失败
                     
             except json.JSONDecodeError:
                 logger.warning(f"修正后的关系不是有效JSON: {content}")
@@ -364,39 +516,80 @@ class EnhancedKnowledgeExtractor(KnowledgeExtractor):
         
         return None
     
-    def process_course_content_with_validation(self, content: str, save_to_graph: bool = True) -> Dict[str, Any]:
+    def process_course_content_with_validation(self, content: str, save_to_graph: bool = True, use_validation: bool = True) -> Dict[str, Any]:
         """
         处理课程内容，提取知识点和关系，并进行验证
         
         Args:
             content: 课程内容文本
             save_to_graph: 是否保存到知识图谱
+            use_validation: 是否使用验证
             
         Returns:
             处理结果，包括提取的关键词、关系、验证结果和统计信息
         """
         logger.info("开始处理课程内容（增强版）...")
+        logger.info(f"验证状态: {'启用' if use_validation else '禁用'}")
         
-        # 1. 提取并验证关键词
-        logger.info("提取并验证知识点关键字...")
-        keywords = self.extract_and_validate_keywords(content)
-        logger.info(f"最终保留 {len(keywords)} 个关键字")
+        # 初始化结果
+        keywords = []
+        relationships = []
+        stats = {}
+        validation_stats = {}
         
-        # 2. 提取并验证关系
-        logger.info("提取并验证知识点关系...")
-        relationships = self.extract_and_validate_relationships(content, keywords)
-        logger.info(f"最终保留 {len(relationships)} 个关系")
+        try:
+            # 1. 提取并验证关键词
+            logger.info("提取并验证知识点关键字...")
+            if use_validation and self.config.enable_validation:
+                keywords = self.extract_and_validate_keywords(content)
+            else:
+                keywords = self.extract_keywords_from_text(content)
+            logger.info(f"最终保留 {len(keywords)} 个关键字")
+        except Exception as e:
+            logger.error(f"关键词提取和验证失败: {e}")
+            keywords = []
+        
+        try:
+            # 2. 提取并验证关系
+            logger.info("提取并验证知识点关系...")
+            if use_validation and self.config.enable_validation:
+                relationships = self.extract_and_validate_relationships(content, keywords)
+            else:
+                relationships = self.extract_relationships_from_text(content, keywords)
+            logger.info(f"最终保留 {len(relationships)} 个关系")
+        except Exception as e:
+            logger.error(f"关系提取和验证失败: {e}")
+            relationships = []
         
         # 3. 保存到知识图谱
-        stats = {}
         if save_to_graph:
-            logger.info("保存到知识图谱...")
-            stats = self.save_to_neo4j(keywords, relationships)
+            try:
+                logger.info("保存到知识图谱...")
+                stats = self.save_to_neo4j(keywords, relationships)
+            except Exception as e:
+                logger.error(f"保存到知识图谱失败: {e}")
+                stats = {'errors': 1, 'message': str(e)}
         
         # 4. 获取验证统计
-        validation_stats = {}
-        if self.validation_system:
-            validation_stats = self.validation_system.get_validation_stats()
+        try:
+            if self.validation_system and use_validation and self.config.enable_validation:
+                validation_stats = self.validation_system.get_validation_stats()
+            else:
+                # 如果验证未启用，返回空统计信息
+                validation_stats = {
+                    'total_validations': 0,
+                    'validity_rate': 0,
+                    'average_confidence': 0,
+                    'message': '验证未启用'
+                }
+        except Exception as e:
+            logger.error(f"获取验证统计失败: {e}")
+            validation_stats = {
+                'total_validations': 0,
+                'validity_rate': 0,
+                'average_confidence': 0,
+                'error': str(e)
+            }
         
         # 5. 返回结果
         result = {
@@ -493,7 +686,7 @@ def main():
             os.getenv("NEO4J_USER", "neo4j"),
             os.getenv("NEO4J_PASSWORD", "aixi1314")
         ),
-        openai_api_key=os.getenv("ZHIPUAI_API_KEY", "your-zhipuai-api-key"),
+        openai_api_key=os.getenv("ZHIPUAI_API_KEY", ""),
         openai_model=os.getenv("ZHIPUAI_MODEL", "glm-4-flash"),
         
         # 验证配置

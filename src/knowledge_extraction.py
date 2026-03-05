@@ -25,7 +25,7 @@ class KnowledgeExtractionConfig:
     """知识点提取配置"""
     neo4j_uri: str = "bolt://localhost:7687"
     neo4j_auth: Tuple[str, str] = ("neo4j", "aixi1314")
-    openai_api_key: str = "your-zhipuai-api-key"
+    openai_api_key: str = os.getenv("ZHIPUAI_API_KEY", "")
     openai_model: str = "glm-4-flash"
     openai_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
     
@@ -67,20 +67,29 @@ class KnowledgeExtractor:
     def _init_neo4j(self):
         """初始化Neo4j连接"""
         try:
+            # 简化连接参数，避免版本兼容性问题
             self.driver = GraphDatabase.driver(
                 self.config.neo4j_uri,
-                auth=self.config.neo4j_auth,
-                database="neo4j",
-                max_connection_lifetime=30,
-                max_transaction_retry_time=5,
-                connection_timeout=5,
-                max_connection_pool_size=10
+                auth=self.config.neo4j_auth
             )
+            # 验证连接
             self.driver.verify_connectivity()
             logger.info("✅ 成功连接Neo4j数据库")
         except Exception as e:
-            logger.error(f"❌ 连接Neo4j失败: {e}")
-            raise
+            logger.error(f"❌ 连接Neo4j失败: {str(e)}")
+            # 尝试不带数据库参数的连接
+            try:
+                self.driver = GraphDatabase.driver(
+                    self.config.neo4j_uri,
+                    auth=self.config.neo4j_auth
+                )
+                # 测试基本连接
+                with self.driver.session() as session:
+                    session.run("RETURN 1")
+                logger.info("✅ 成功连接Neo4j数据库（备用方式）")
+            except Exception as e2:
+                logger.error(f"❌ Neo4j备用连接也失败: {str(e2)}")
+                raise ConnectionError("无法连接到Neo4j数据库，请检查连接配置")
     
     def close(self):
         """关闭数据库连接"""
@@ -275,7 +284,7 @@ class KnowledgeExtractor:
         keywords.extend(rule_based_keywords)
         
         # 2. 如果启用LLM，使用LLM进行提取
-        if use_llm and self.config.openai_api_key != "your-zhipuai-api-key":
+        if use_llm and self.config.openai_api_key:
             llm_keywords = self._extract_keywords_by_llm(text)
             keywords.extend(llm_keywords)
         
@@ -419,11 +428,19 @@ class KnowledgeExtractor:
                 "max_tokens": 1500
             }
             
+            # 确保URL以/chat/completions结尾
+            base_url = self.config.openai_base_url
+            if not base_url.endswith('/chat/completions'):
+                if base_url.endswith('/'):
+                    base_url += 'chat/completions'
+                else:
+                    base_url += '/chat/completions'
+            
             response = requests.post(
-                self.config.openai_base_url,
+                base_url,
                 headers=headers,
                 json=data,
-                timeout=30
+                timeout=60  # 增加超时时间到60秒
             )
             response.raise_for_status()
             
@@ -472,17 +489,35 @@ class KnowledgeExtractor:
         """
         relationships = []
         
-        # 1. 基于规则的关系提取
-        rule_based_relationships = self._extract_relationships_by_rules(text, keywords)
-        relationships.extend(rule_based_relationships)
-        
-        # 2. 如果启用LLM，使用LLM进行提取
-        if self.config.openai_api_key != "your-zhipuai-api-key":
-            llm_relationships = self._extract_relationships_by_llm(text, keywords)
-            relationships.extend(llm_relationships)
+        try:
+            # 1. 基于规则的关系提取
+            rule_based_relationships = self._extract_relationships_by_rules(text, keywords)
+            # 确保只添加字典对象
+            for rel in rule_based_relationships:
+                if isinstance(rel, dict):
+                    relationships.append(rel)
+                else:
+                    logger.warning(f"跳过非字典对象的关系: {type(rel)}")
+            
+            # 2. 如果启用LLM，使用LLM进行提取
+            if self.config.openai_api_key:
+                llm_relationships = self._extract_relationships_by_llm(text, keywords)
+                # 确保只添加字典对象
+                for rel in llm_relationships:
+                    if isinstance(rel, dict):
+                        relationships.append(rel)
+                    else:
+                        logger.warning(f"跳过非字典对象的关系: {type(rel)}")
+        except Exception as e:
+            logger.error(f"关系提取过程中出错: {e}")
+            relationships = []
         
         # 3. 去重和排序
-        unique_relationships = self._deduplicate_and_rank_relationships(relationships)
+        try:
+            unique_relationships = self._deduplicate_and_rank_relationships(relationships)
+        except Exception as e:
+            logger.error(f"关系去重和排序失败: {e}")
+            unique_relationships = relationships
         
         # 4. 限制返回数量
         return unique_relationships[:self.config.max_relationships_per_text]
@@ -490,47 +525,55 @@ class KnowledgeExtractor:
     def _extract_relationships_by_rules(self, text: str, keywords: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """基于规则的关系提取"""
         relationships = []
-        keyword_names = [kw['name'].lower() for kw in keywords]
         
-        # 遍历关系模式
-        for rel_type, rel_info in self.relationship_patterns.items():
-            for pattern in rel_info['patterns']:
-                matches = re.finditer(pattern, text, re.IGNORECASE)
-                for match in matches:
-                    # 提取匹配的实体
-                    entities = []
-                    for i in range(1, len(match.groups()) + 1):
-                        entity = match.group(i).strip()
-                        entity_lower = entity.lower()
-                        
-                        # 检查是否是已知关键词
-                        if entity_lower in keyword_names:
-                            # 找到对应的关键词对象
-                            for kw in keywords:
-                                if kw['name'].lower() == entity_lower:
-                                    entities.append(kw)
-                                    break
-                        else:
-                            # 如果不是已知关键词，创建一个新的关键词对象
-                            node_type = self._determine_node_type(entity, 'concepts')
-                            entities.append({
-                                'name': entity,
-                                'type': node_type,
-                                'confidence': 0.5,
-                                'source': 'rule_based_relationship',
-                                'context': self._extract_context(text, entity)
-                            })
-                    
-                    # 如果找到了至少两个实体，创建关系
-                    if len(entities) >= 2:
-                        relationships.append({
-                            'source': entities[0],
-                            'target': entities[1],
-                            'type': rel_type,
-                            'confidence': rel_info['confidence'],
-                            'context': match.group(0),
-                            'extraction_method': 'rule_based'
-                        })
+        try:
+            keyword_names = [kw['name'].lower() for kw in keywords if isinstance(kw, dict)]
+            
+            # 遍历关系模式
+            for rel_type, rel_info in self.relationship_patterns.items():
+                for pattern in rel_info['patterns']:
+                    try:
+                        matches = re.finditer(pattern, text, re.IGNORECASE)
+                        for match in matches:
+                            # 提取匹配的实体
+                            entities = []
+                            for i in range(1, len(match.groups()) + 1):
+                                entity = match.group(i).strip()
+                                entity_lower = entity.lower()
+                                
+                                # 检查是否是已知关键词
+                                if entity_lower in keyword_names:
+                                    # 找到对应的关键词对象
+                                    for kw in keywords:
+                                        if isinstance(kw, dict) and kw['name'].lower() == entity_lower:
+                                            entities.append(kw)
+                                            break
+                                else:
+                                    # 如果不是已知关键词，创建一个新的关键词对象
+                                    node_type = self._determine_node_type(entity, 'concepts')
+                                    entities.append({
+                                        'name': entity,
+                                        'type': node_type,
+                                        'confidence': 0.5,
+                                        'source': 'rule_based_relationship',
+                                        'context': self._extract_context(text, entity)
+                                    })
+                            
+                            # 如果找到了至少两个实体，创建关系
+                            if len(entities) >= 2:
+                                relationships.append({
+                                    'source': entities[0],
+                                    'target': entities[1],
+                                    'type': rel_type,
+                                    'confidence': rel_info['confidence'],
+                                    'context': match.group(0),
+                                    'extraction_method': 'rule_based'
+                                })
+                    except Exception as e:
+                        logger.error(f"关系模式匹配失败: {e}, 模式: {pattern}")
+                        continue
+        except Exception as e:
+            logger.error(f"基于规则的关系提取失败: {e}")
         
         return relationships
     
@@ -540,7 +583,7 @@ class KnowledgeExtractor:
             # 准备关键词信息
             keyword_info = "\n".join([
                 f"- {kw['name']} ({kw['type']}, 置信度: {kw['confidence']})"
-                for kw in keywords
+                for kw in keywords if isinstance(kw, dict)
             ])
             
             system_prompt = """你是一个计算机网络领域的专家，请从给定的文本和关键词中提取知识点之间的关系。
@@ -554,8 +597,8 @@ class KnowledgeExtractor:
 返回格式示例：
 [
   {
-    "source": "TCP",
-    "target": "传输层",
+    "source": {"name": "TCP", "type": "Protocol"},
+    "target": {"name": "传输层", "type": "Layer"},
     "type": "APPLY_TO",
     "confidence": 0.9,
     "description": "TCP协议应用于传输层"
@@ -587,11 +630,19 @@ class KnowledgeExtractor:
                 "max_tokens": 1500
             }
             
+            # 确保URL以/chat/completions结尾
+            base_url = self.config.openai_base_url
+            if not base_url.endswith('/chat/completions'):
+                if base_url.endswith('/'):
+                    base_url += 'chat/completions'
+                else:
+                    base_url += '/chat/completions'
+            
             response = requests.post(
-                self.config.openai_base_url,
+                base_url,
                 headers=headers,
                 json=data,
-                timeout=30
+                timeout=60  # 增加超时时间到60秒
             )
             response.raise_for_status()
             
@@ -601,12 +652,31 @@ class KnowledgeExtractor:
             # 尝试解析JSON
             try:
                 llm_relationships = json.loads(content)
-                # 添加来源标记和补充信息
+                # 确保返回的是列表
+                if not isinstance(llm_relationships, list):
+                    logger.warning(f"LLM返回的不是列表: {type(llm_relationships)}")
+                    return []
+                
+                # 添加来源标记和补充信息，并确保每个关系都是字典
+                processed_relationships = []
                 for rel in llm_relationships:
-                    rel['extraction_method'] = 'llm'
-                    if 'context' not in rel:
-                        rel['context'] = text
-                return llm_relationships
+                    if isinstance(rel, dict):
+                        rel['extraction_method'] = 'llm'
+                        if 'context' not in rel:
+                            rel['context'] = text
+                        
+                        # 确保source和target是字典对象
+                        if 'source' in rel and not isinstance(rel['source'], dict):
+                            rel['source'] = {'name': str(rel['source']), 'type': 'Unknown'}
+                        
+                        if 'target' in rel and not isinstance(rel['target'], dict):
+                            rel['target'] = {'name': str(rel['target']), 'type': 'Unknown'}
+                        
+                        processed_relationships.append(rel)
+                    else:
+                        logger.warning(f"跳过非字典对象的关系: {type(rel)}")
+                
+                return processed_relationships
             except json.JSONDecodeError:
                 logger.warning(f"LLM返回的不是有效JSON: {content}")
                 return []
@@ -620,12 +690,44 @@ class KnowledgeExtractor:
         # 按源、目标、类型去重，保留置信度最高的
         unique_relationships = {}
         for rel in relationships:
-            key = (rel['source']['name'].lower(), rel['target']['name'].lower(), rel['type'])
-            if key not in unique_relationships or rel['confidence'] > unique_relationships[key]['confidence']:
-                unique_relationships[key] = rel
+            # 确保rel是字典对象
+            if not isinstance(rel, dict):
+                logger.warning(f"跳过非字典对象的关系: {type(rel)}")
+                continue
+                
+            try:
+                # 安全获取源、目标和类型
+                source = rel.get('source', {})
+                target = rel.get('target', {})
+                rel_type = rel.get('type', '')
+                
+                # 确保source和target是字典对象
+                if not isinstance(source, dict):
+                    source = {'name': str(source), 'type': 'Unknown'}
+                
+                if not isinstance(target, dict):
+                    target = {'name': str(target), 'type': 'Unknown'}
+                
+                source_name = source.get('name', '').lower()
+                target_name = target.get('name', '').lower()
+                
+                if not source_name or not target_name or not rel_type:
+                    logger.warning(f"跳过不完整的关系: {rel}")
+                    continue
+                
+                key = (source_name, target_name, rel_type)
+                if key not in unique_relationships or rel.get('confidence', 0) > unique_relationships[key].get('confidence', 0):
+                    unique_relationships[key] = rel
+            except Exception as e:
+                logger.error(f"处理关系时出错: {e}, 关系: {rel}")
+                continue
         
         # 按置信度排序
-        return sorted(unique_relationships.values(), key=lambda x: x['confidence'], reverse=True)
+        try:
+            return sorted(unique_relationships.values(), key=lambda x: x.get('confidence', 0), reverse=True)
+        except Exception as e:
+            logger.error(f"关系排序失败: {e}")
+            return list(unique_relationships.values())
     
     def save_to_neo4j(self, keywords: List[Dict[str, Any]], relationships: List[Dict[str, Any]]) -> Dict[str, int]:
         """
@@ -662,9 +764,10 @@ class KnowledgeExtractor:
                         if 'description' in keyword:
                             props['description'] = keyword['description']
                         
-                        # 构建Cypher查询
+                        # 构建Cypher查询 - 确保节点标签不包含空格
+                        node_label = keyword['type'].replace(' ', '_')
                         cypher = f"""
-                        MERGE (n:{keyword['type']} {{name: $name}})
+                        MERGE (n:{node_label} {{name: $name}})
                         SET n += $props
                         RETURN n
                         """
@@ -695,10 +798,12 @@ class KnowledgeExtractor:
                         if 'description' in rel:
                             rel_props['description'] = rel['description']
                         
-                        # 构建Cypher查询
+                        # 构建Cypher查询 - 确保节点标签不包含空格
+                        source_label = rel['source']['type'].replace(' ', '_')
+                        target_label = rel['target']['type'].replace(' ', '_')
                         cypher = f"""
-                        MATCH (a:{rel['source']['type']} {{name: $source_name}})
-                        MATCH (b:{rel['target']['type']} {{name: $target_name}})
+                        MATCH (a:{source_label} {{name: $source_name}})
+                        MATCH (b:{target_label} {{name: $target_name}})
                         MERGE (a)-[r:{rel['type']}]->(b)
                         SET r += $props
                         RETURN r
@@ -796,7 +901,7 @@ def main():
             os.getenv("NEO4J_USER", "neo4j"),
             os.getenv("NEO4J_PASSWORD", "aixi1314")
         ),
-        openai_api_key=os.getenv("ZHIPUAI_API_KEY", "your-zhipuai-api-key"),
+        openai_api_key=os.getenv("ZHIPUAI_API_KEY", ""),
         openai_model=os.getenv("ZHIPUAI_MODEL", "glm-4-flash")
     )
     

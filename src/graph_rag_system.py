@@ -27,7 +27,7 @@ class GraphRAGConfig:
     """GraphRAG系统配置"""
     neo4j_uri: str = "bolt://localhost:7687"
     neo4j_auth: Tuple[str, str] = ("neo4j", "aixi1314")
-    openai_api_key: str = "your-zhipuai-api-key"
+    openai_api_key: str = os.getenv("ZHIPUAI_API_KEY", "b5d49df99d88433e944ff84304d3105a.Jk57Qbo2dHO56AKS")
     openai_model: str = "glm-4-flash"
     max_context_length: int = 4000  # 最大上下文长度
     max_retrieved_nodes: int = 20   # 最大检索节点数
@@ -39,17 +39,12 @@ class GraphRetriever:
     def __init__(self, uri: str, auth: Tuple[str, str]):
         self.driver = None
         try:
-            # 添加连接超时设置
+            # 简化连接参数，避免版本兼容性问题
             self.driver = GraphDatabase.driver(
                 uri,
-                auth=auth,
-                database="neo4j",
-                max_connection_lifetime=30,
-                max_transaction_retry_time=5,
-                connection_timeout=5,
-                max_connection_pool_size=10
+                auth=auth
             )
-            # 设置验证连接（移除不支持的timeout参数）
+            # 设置验证连接
             self.driver.verify_connectivity()
             logger.info("✅ 成功连接Neo4j数据库")
         except exceptions.AuthError as e:
@@ -60,7 +55,19 @@ class GraphRetriever:
             raise
         except Exception as e:
             logger.error(f"❌ 连接异常：{e}")
-            raise
+            # 尝试不带数据库参数的连接
+            try:
+                self.driver = GraphDatabase.driver(
+                    uri,
+                    auth=auth
+                )
+                # 测试基本连接
+                with self.driver.session() as session:
+                    session.run("RETURN 1")
+                logger.info("✅ 成功连接Neo4j数据库（备用方式）")
+            except Exception as e2:
+                logger.error(f"❌ Neo4j连接完全失败: {e2}")
+                raise
     
     def close(self):
         """关闭数据库连接"""
@@ -581,7 +588,7 @@ def main():
             os.getenv("NEO4J_USER", "neo4j"),
             os.getenv("NEO4J_PASSWORD", "aixi1314")
         ),
-        openai_api_key=os.getenv("ZHIPUAI_API_KEY", "your-zhipuai-api-key"),
+        openai_api_key=os.getenv("ZHIPUAI_API_KEY", "b5d49df99d88433e944ff84304d3105a.Jk57Qbo2dHO56AKS"),
         openai_model=os.getenv("ZHIPUAI_MODEL", "glm-4-flash")
     )
     

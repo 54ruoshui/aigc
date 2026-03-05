@@ -86,6 +86,7 @@ NEO4J_PASSWORD=aixi1314
 NEO4J_DATABASE=neo4j
 
 # 智谱AI配置
+# 注意：your-zhipuai-api-key 是示例值，请替换为您的实际API密钥
 ZHIPUAI_API_KEY=your-zhipuai-api-key
 ZHIPUAI_MODEL=glm-4
 ZHIPUAI_BASE_URL=https://open.bigmodel.cn/api/paas/v4

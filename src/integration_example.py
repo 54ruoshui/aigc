@@ -28,7 +28,7 @@ def init_extractor():
                 os.getenv("NEO4J_USER", "neo4j"),
                 os.getenv("NEO4J_PASSWORD", "aixi1314")
             ),
-            openai_api_key=os.getenv("ZHIPUAI_API_KEY", "your-zhipuai-api-key"),
+            openai_api_key=os.getenv("ZHIPUAI_API_KEY", "b5d49df99d88433e944ff84304d3105a.Jk57Qbo2dHO56AKS"),
             openai_model=os.getenv("ZHIPUAI_MODEL", "glm-4-flash"),
             confidence_threshold=0.6
         )

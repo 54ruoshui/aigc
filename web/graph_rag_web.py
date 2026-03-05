@@ -100,7 +100,7 @@ def init_rag_system():
             neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
             neo4j_user = os.getenv("NEO4J_USER", "neo4j")
             neo4j_password = os.getenv("NEO4J_PASSWORD", "aixi1314")
-            api_key = os.getenv("ZHIPUAI_API_KEY", "your-zhipuai-api-key")
+            api_key = os.getenv("ZHIPUAI_API_KEY", "")
             api_model = os.getenv("ZHIPUAI_MODEL", "glm-4-flash")
             
             config = GraphRAGConfig(
@@ -139,7 +139,7 @@ def init_knowledge_extractor():
         neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
         neo4j_user = os.getenv("NEO4J_USER", "neo4j")
         neo4j_password = os.getenv("NEO4J_PASSWORD", "aixi1314")
-        api_key = os.getenv("ZHIPUAI_API_KEY", "your-zhipuai-api-key")
+        api_key = os.getenv("ZHIPUAI_API_KEY", "")
         api_model = os.getenv("ZHIPUAI_MODEL", "glm-4-flash")
         
         config = KnowledgeExtractionConfig(
@@ -170,7 +170,7 @@ def init_enhanced_knowledge_extractor():
         neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
         neo4j_user = os.getenv("NEO4J_USER", "neo4j")
         neo4j_password = os.getenv("NEO4J_PASSWORD", "aixi1314")
-        api_key = os.getenv("ZHIPUAI_API_KEY", "your-zhipuai-api-key")
+        api_key = os.getenv("ZHIPUAI_API_KEY", "")
         api_model = os.getenv("ZHIPUAI_MODEL", "glm-4-flash")
         
         # 检查是否启用验证
@@ -296,109 +296,124 @@ def extract_knowledge():
         
         if use_enhanced and use_validation:
             # 使用增强版提取器（带验证）
-            result = enhanced_extractor.process_course_content_with_validation(content, save_to_graph=True)
-            
-            # 添加验证统计信息
-            validation_stats = result.get('validation_stats', {})
-            valid_keywords = [kw for kw in result.get('keywords', []) if kw.get('validation', {}).get('is_valid', False)]
-            valid_relationships = [rel for rel in result.get('relationships', []) if rel.get('validation', {}).get('is_valid', False)]
-            
-            # 构建详细消息
-            message_parts = []
-            
-            if result['stats']['nodes_created'] > 0:
-                message_parts.append(f"创建了 {result['stats']['nodes_created']} 个新节点")
-            
-            if result['stats']['nodes_updated'] > 0:
-                message_parts.append(f"更新了 {result['stats']['nodes_updated']} 个现有节点")
-            
-            if result['stats']['relationships_created'] > 0:
-                message_parts.append(f"创建了 {result['stats']['relationships_created']} 个新关系")
-            
-            if result['stats']['errors'] > 0:
-                message_parts.append(f"遇到 {result['stats']['errors']} 个错误")
-            
-            # 添加验证信息
-            if validation_stats.get('total_validations', 0) > 0:
-                message_parts.append(f"验证了 {validation_stats.get('total_validations', 0)} 个项目")
-                message_parts.append(f"通过率 {validation_stats.get('validity_rate', 0):.1%}")
-            
-            if not message_parts:
-                message_parts.append("没有检测到新的知识点或关系")
-            
-            detailed_message = "知识点提取完成（已验证）：" + "，".join(message_parts)
-            
-            # 添加解释
-            explanation = ""
-            if result['stats']['nodes_created'] == 0 and result['stats']['nodes_updated'] > 0:
-                explanation = "💡 提示：提取的关键词已存在于数据库中，因此更新了现有节点而不是创建新节点。"
-            
-            if len(valid_keywords) < len(result.get('keywords', [])):
-                explanation += f"\n🔍 经过技能验证，过滤了 {len(result.get('keywords', [])) - len(valid_keywords)} 个无效知识点。"
-            
-            if len(valid_relationships) < len(result.get('relationships', [])):
-                explanation += f"\n🔍 经过技能验证，过滤了 {len(result.get('relationships', [])) - len(valid_relationships)} 个无效关系。"
-            
-            # 返回增强版结果
-            response_data = {
-                "success": True,
-                "keywords": result['keywords'],
-                "relationships": result['relationships'],
-                "valid_keywords": valid_keywords,
-                "valid_relationships": valid_relationships,
-                "stats": result['stats'],
-                "validation_stats": validation_stats,
-                "content_length": result['content_length'],
-                "message": detailed_message,
-                "explanation": explanation,
-                "summary": f"提取了 {len(result['keywords'])} 个关键字和 {len(result['relationships'])} 个关系（有效：{len(valid_keywords)} 个关键字，{len(valid_relationships)} 个关系）",
-                "extraction_mode": "enhanced_with_validation"
-            }
+            try:
+                result = enhanced_extractor.process_course_content_with_validation(content, save_to_graph=True)
+                
+                # 添加验证统计信息
+                validation_stats = result.get('validation_stats', {})
+                valid_keywords = [kw for kw in result.get('keywords', []) if kw.get('validation', {}).get('is_valid', False)]
+                valid_relationships = [rel for rel in result.get('relationships', []) if rel.get('validation', {}).get('is_valid', False)]
+                
+                # 构建详细消息
+                message_parts = []
+                
+                stats = result.get('stats', {})
+                if stats.get('nodes_created', 0) > 0:
+                    message_parts.append(f"创建了 {stats['nodes_created']} 个新节点")
+                
+                if stats.get('nodes_updated', 0) > 0:
+                    message_parts.append(f"更新了 {stats['nodes_updated']} 个现有节点")
+                
+                if stats.get('relationships_created', 0) > 0:
+                    message_parts.append(f"创建了 {stats['relationships_created']} 个新关系")
+                
+                if stats.get('errors', 0) > 0:
+                    message_parts.append(f"遇到 {stats['errors']} 个错误")
+                
+                # 添加验证信息
+                if validation_stats.get('total_validations', 0) > 0:
+                    message_parts.append(f"验证了 {validation_stats.get('total_validations', 0)} 个项目")
+                    message_parts.append(f"通过率 {validation_stats.get('validity_rate', 0):.1%}")
+                
+                if not message_parts:
+                    message_parts.append("没有检测到新的知识点或关系")
+                
+                detailed_message = "知识点提取完成（已验证）：" + "，".join(message_parts)
+                
+                # 添加解释
+                explanation = ""
+                if stats.get('nodes_created', 0) == 0 and stats.get('nodes_updated', 0) > 0:
+                    explanation = "💡 提示：提取的关键词已存在于数据库中，因此更新了现有节点而不是创建新节点。"
+                
+                if len(valid_keywords) < len(result.get('keywords', [])):
+                    explanation += f"\n🔍 经过技能验证，过滤了 {len(result.get('keywords', [])) - len(valid_keywords)} 个无效知识点。"
+                
+                if len(valid_relationships) < len(result.get('relationships', [])):
+                    explanation += f"\n🔍 经过技能验证，过滤了 {len(result.get('relationships', [])) - len(valid_relationships)} 个无效关系。"
+                
+                # 返回增强版结果
+                response_data = {
+                    "success": True,
+                    "keywords": result.get('keywords', []),
+                    "relationships": result.get('relationships', []),
+                    "valid_keywords": valid_keywords,
+                    "valid_relationships": valid_relationships,
+                    "stats": stats,
+                    "validation_stats": validation_stats,
+                    "content_length": result.get('content_length', 0),
+                    "message": detailed_message,
+                    "explanation": explanation,
+                    "summary": f"提取了 {len(result.get('keywords', []))} 个关键字和 {len(result.get('relationships', []))} 个关系（有效：{len(valid_keywords)} 个关键字，{len(valid_relationships)} 个关系）",
+                    "extraction_mode": "enhanced_with_validation"
+                }
+            except Exception as e:
+                logger.error(f"增强版提取失败: {e}")
+                # 回退到基础版提取
+                use_enhanced = False
             
         else:
             # 使用基础版提取器
-            result = knowledge_extractor.process_course_content(content, save_to_graph=True)
-            
-            # 构建详细消息
-            message_parts = []
-            
-            if result['stats']['nodes_created'] > 0:
-                message_parts.append(f"创建了 {result['stats']['nodes_created']} 个新节点")
-            
-            if result['stats']['nodes_updated'] > 0:
-                message_parts.append(f"更新了 {result['stats']['nodes_updated']} 个现有节点")
-            
-            if result['stats']['relationships_created'] > 0:
-                message_parts.append(f"更新了 {result['stats']['relationships_created']} 个新关系")
-            
-            if result['stats']['errors'] > 0:
-                message_parts.append(f"遇到 {result['stats']['errors']} 个错误")
-            
-            if not message_parts:
-                message_parts.append("没有检测到新的知识点或关系")
-            
-            detailed_message = "知识点提取完成：" + "，".join(message_parts)
-            
-            # 添加解释
-            explanation = ""
-            if result['stats']['nodes_created'] == 0 and result['stats']['nodes_updated'] > 0:
-                explanation = "💡 提示：提取的关键词已存在于数据库中，因此更新了现有节点而不是创建新节点。"
-            
-            if use_enhanced and not use_validation:
-                explanation += "\n⚠️ 技能验证已禁用，建议启用以提高提取质量。"
-            
-            # 返回基础版结果
-            response_data = {
-                "success": True,
-                "keywords": result['keywords'],
-                "relationships": result['relationships'],
-                "stats": result['stats'],
-                "content_length": result['content_length'],
-                "message": detailed_message,
-                "explanation": explanation,
-                "summary": f"提取了 {len(result['keywords'])} 个关键字和 {len(result['relationships'])} 个关系",
-                "extraction_mode": "basic"
-            }
+            try:
+                result = knowledge_extractor.process_course_content(content, save_to_graph=True)
+                
+                # 构建详细消息
+                message_parts = []
+                
+                stats = result.get('stats', {})
+                if stats.get('nodes_created', 0) > 0:
+                    message_parts.append(f"创建了 {stats['nodes_created']} 个新节点")
+                
+                if stats.get('nodes_updated', 0) > 0:
+                    message_parts.append(f"更新了 {stats['nodes_updated']} 个现有节点")
+                
+                if stats.get('relationships_created', 0) > 0:
+                    message_parts.append(f"更新了 {stats['relationships_created']} 个新关系")
+                
+                if stats.get('errors', 0) > 0:
+                    message_parts.append(f"遇到 {stats['errors']} 个错误")
+                
+                if not message_parts:
+                    message_parts.append("没有检测到新的知识点或关系")
+                
+                detailed_message = "知识点提取完成：" + "，".join(message_parts)
+                
+                # 添加解释
+                explanation = ""
+                if stats.get('nodes_created', 0) == 0 and stats.get('nodes_updated', 0) > 0:
+                    explanation = "💡 提示：提取的关键词已存在于数据库中，因此更新了现有节点而不是创建新节点。"
+                
+                if use_enhanced and not use_validation:
+                    explanation += "\n⚠️ 技能验证已禁用，建议启用以提高提取质量。"
+                
+                # 返回基础版结果
+                response_data = {
+                    "success": True,
+                    "keywords": result.get('keywords', []),
+                    "relationships": result.get('relationships', []),
+                    "stats": stats,
+                    "content_length": result.get('content_length', 0),
+                    "message": detailed_message,
+                    "explanation": explanation,
+                    "summary": f"提取了 {len(result.get('keywords', []))} 个关键字和 {len(result.get('relationships', []))} 个关系",
+                    "extraction_mode": "basic"
+                }
+            except Exception as e:
+                logger.error(f"基础版提取失败: {e}")
+                # 如果两种提取方式都失败，返回错误
+                return jsonify({
+                    "error": str(e),
+                    "message": "知识点提取失败，请检查输入内容或稍后再试"
+                }), 500
         
         logger.info(f"✅ 知识点提取完成: {response_data['message']}")
         return jsonify(response_data)
