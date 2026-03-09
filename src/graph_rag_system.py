@@ -14,6 +14,7 @@ from dataclasses import dataclass
 import logging
 from datetime import datetime
 from src.cache import query_cache
+from .enhanced_prompt_engineering import EnhancedPromptEngineering, PromptEngineeringConfig
 
 # 加载环境变量
 load_dotenv()
@@ -286,6 +287,18 @@ class LLMGenerator:
         self.api_key = api_key
         self.model = model
         self.base_url = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+        
+        # 初始化增强的提示工程系统
+        prompt_config = PromptEngineeringConfig(
+            openai_api_key=api_key,
+            openai_model=model,
+            openai_base_url="https://open.bigmodel.cn/api/paas/v4",
+            strict_mode=True,
+            require_evidence=True,
+            min_confidence_threshold=0.7,
+            max_hallucination_risk=0.3
+        )
+        self.prompt_engineering = EnhancedPromptEngineering(prompt_config)
     
     def format_context(self, graph_data: Dict) -> str:
         """格式化图数据为上下文"""
@@ -317,26 +330,49 @@ class LLMGenerator:
         return "\n".join(context_parts)
     
     def generate_answer(self, question: str, context: str) -> str:
-        """生成答案"""
-        system_prompt = """你是一个计算机网络领域的专家，基于提供的知识图谱信息回答用户问题。
+        """使用增强的提示工程生成答案"""
+        try:
+            # 构建增强的答案生成提示
+            system_prompt = f"""你是一个计算机网络领域的专家，基于提供的知识图谱信息回答用户问题。
 
-请遵循以下原则：
-1. 仅基于提供的上下文信息回答问题
-2. 如果上下文信息不足，请明确说明
-3. 回答要准确、专业、易懂
-4. 可以适当扩展解释，但要基于事实
-5. 使用中文回答
+# 严格约束
+1. 必须仅基于提供的上下文信息回答问题，不允许使用外部知识
+2. 如果上下文信息不足，必须明确说明并提供原因
+3. 回答必须准确、专业、易懂，避免模糊不清的表达
+4. 可以适当扩展解释，但必须基于上下文中的事实
+5. 使用中文回答，语言要流畅自然
+6. 不允许编造或推测上下文中没有的信息
+
+# 证据要求
+1. 回答中的每个关键点都必须有上下文证据支持
+2. 引用具体的实体、关系或路径作为证据
+3. 如果信息不确定，必须明确指出不确定性程度
+4. 对于技术性内容，确保术语使用准确
+
+# 领域知识库参考
+以下是计算机网络领域的标准知识点，请参考这些标准来验证答案的准确性：
+{json.dumps(self.prompt_engineering.domain_knowledge_base, ensure_ascii=False, indent=2)}
+
+# 风险控制
+1. 幻觉风险评估：确保答案不包含上下文中没有的信息
+2. 逻辑一致性检查：确保答案内部逻辑一致
+3. 领域一致性检查：确保答案符合计算机网络领域的基本原理
+
+# 输出格式要求
+1. 提供清晰、结构化的答案
+2. 使用适当的标题和分段
+3. 在关键信息后提供证据引用
+4. 如果信息不足，明确说明缺少哪些信息
 
 上下文信息：
 """
-        
-        user_prompt = f"""
+            
+            user_prompt = f"""
 用户问题：{question}
 
-请基于以上上下文信息回答用户问题。
+请基于以上上下文信息回答用户问题，并遵循所有约束和要求。
 """
-        
-        try:
+            
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json"
@@ -348,7 +384,7 @@ class LLMGenerator:
                     {"role": "system", "content": system_prompt + context},
                     {"role": "user", "content": user_prompt}
                 ],
-                "temperature": 0.7,
+                "temperature": 0.3,  # 降低温度以减少创造性，增加准确性
                 "max_tokens": 1500
             }
             
@@ -356,11 +392,48 @@ class LLMGenerator:
             response.raise_for_status()
             
             result = response.json()
-            return result["choices"][0]["message"]["content"]
+            answer = result["choices"][0]["message"]["content"]
+            
+            # 对答案进行基本的质量检查
+            if self._is_answer_quality_acceptable(answer, context, question):
+                return answer
+            else:
+                logger.warning("生成的答案质量不符合要求，尝试重新生成")
+                # 如果质量不符合要求，尝试重新生成（这里简化处理）
+                return self._generate_fallback_answer(question, context)
             
         except Exception as e:
-            logger.error(f"LLM生成失败: {e}")
-            return "抱歉，我暂时无法回答这个问题，请稍后再试。"
+            logger.error(f"增强LLM生成失败: {e}")
+            return self._generate_fallback_answer(question, context)
+    
+    def _is_answer_quality_acceptable(self, answer: str, context: str, question: str) -> bool:
+        """检查答案质量是否可接受"""
+        # 基本质量检查
+        if not answer or len(answer.strip()) < 10:
+            return False
+        
+        # 检查是否包含明显的拒绝回答
+        refusal_phrases = ["无法回答", "不能回答", "不知道", "不清楚", "没有足够信息"]
+        for phrase in refusal_phrases:
+            if phrase in answer and len(context) > 100:  # 如果上下文充足但仍然拒绝
+                return False
+        
+        # 检查是否包含明显的幻觉指示
+        hallucination_indicators = ["可能", "大概", "也许", "推测", "假设", "猜测"]
+        hallucination_count = sum(1 for indicator in hallucination_indicators if indicator in answer)
+        
+        # 如果不确定性表达过多，可能质量不高
+        if hallucination_count > 3:
+            return False
+        
+        return True
+    
+    def _generate_fallback_answer(self, question: str, context: str) -> str:
+        """生成回退答案"""
+        if not context or len(context.strip()) < 50:
+            return "抱歉，根据当前的知识图谱信息，我无法找到与您的问题相关的内容。请尝试使用不同的关键词或提供更多上下文信息。"
+        else:
+            return f"基于提供的知识图谱信息，我找到了以下相关内容：\n\n{context}\n\n请注意，这些信息可能不足以完全回答您的问题。建议您提供更具体的问题或尝试其他相关查询。"
 
 class GraphRAGSystem:
     """GraphRAG主系统"""

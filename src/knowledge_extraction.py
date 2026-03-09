@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from neo4j import GraphDatabase, exceptions
 import requests
 from dotenv import load_dotenv
+from .enhanced_prompt_engineering import EnhancedPromptEngineering, PromptEngineeringConfig
 
 # 加载环境变量
 load_dotenv()
@@ -45,6 +46,20 @@ class KnowledgeExtractor:
         self.config = config
         self.driver = None
         self._init_neo4j()
+        
+        # 初始化增强的提示工程系统
+        prompt_config = PromptEngineeringConfig(
+            openai_api_key=config.openai_api_key,
+            openai_model=config.openai_model,
+            openai_base_url=config.openai_base_url,
+            neo4j_uri=config.neo4j_uri,
+            neo4j_auth=config.neo4j_auth,
+            strict_mode=True,
+            require_evidence=True,
+            min_confidence_threshold=0.7,
+            max_hallucination_risk=0.3
+        )
+        self.prompt_engineering = EnhancedPromptEngineering(prompt_config)
         
         # 预定义的网络领域关键词字典
         self.network_keywords = self._load_network_keywords()
@@ -96,6 +111,10 @@ class KnowledgeExtractor:
         if self.driver:
             self.driver.close()
             logger.info("🔌 已关闭Neo4j连接")
+        
+        if self.prompt_engineering:
+            self.prompt_engineering.close()
+            logger.info("🔌 已关闭提示工程系统")
     
     def _load_network_keywords(self) -> Dict[str, List[str]]:
         """加载网络领域关键词字典"""
@@ -387,81 +406,61 @@ class KnowledgeExtractor:
         return text[start:end].strip()
     
     def _extract_keywords_by_llm(self, text: str) -> List[Dict[str, Any]]:
-        """使用LLM提取关键词"""
+        """使用增强的LLM提示工程提取关键词"""
         try:
-            system_prompt = """你是一个计算机网络领域的专家，请从给定的文本中提取重要的知识点关键字。
-
-要求：
-1. 提取计算机网络相关的专业术语、概念、协议、设备等
-2. 每个关键字需要确定其类型（Protocol、Device、Layer、Knowledge、SecurityConcept、NetworkType、Problem、Solution）
-3. 为每个关键字给出置信度（0-1之间的数值）
-4. 返回JSON格式的结果
-
-返回格式示例：
-[
-  {
-    "name": "TCP",
-    "type": "Protocol",
-    "confidence": 0.9,
-    "description": "传输控制协议"
-  }
-]"""
+            # 使用增强的提示工程
+            prompt_data = self.prompt_engineering.build_enhanced_keyword_extraction_prompt(text)
+            result = self.prompt_engineering.call_llm_with_enhanced_prompt(prompt_data)
             
-            user_prompt = f"""请从以下文本中提取计算机网络知识点关键字：
-
-{text}
-
-请返回JSON格式的结果。"""
-            
-            headers = {
-                "Authorization": f"Bearer {self.config.openai_api_key}",
-                "Content-Type": "application/json"
-            }
-            
-            data = {
-                "model": self.config.openai_model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                "temperature": 0.3,
-                "max_tokens": 1500
-            }
-            
-            # 确保URL以/chat/completions结尾
-            base_url = self.config.openai_base_url
-            if not base_url.endswith('/chat/completions'):
-                if base_url.endswith('/'):
-                    base_url += 'chat/completions'
-                else:
-                    base_url += '/chat/completions'
-            
-            response = requests.post(
-                base_url,
-                headers=headers,
-                json=data,
-                timeout=60  # 增加超时时间到60秒
-            )
-            response.raise_for_status()
-            
-            result = response.json()
-            content = result["choices"][0]["message"]["content"]
-            
-            # 尝试解析JSON
-            try:
-                llm_keywords = json.loads(content)
-                # 添加来源标记
-                for keyword in llm_keywords:
-                    keyword['source'] = 'llm'
-                    if 'context' not in keyword:
-                        keyword['context'] = self._extract_context(text, keyword['name'])
-                return llm_keywords
-            except json.JSONDecodeError:
-                logger.warning(f"LLM返回的不是有效JSON: {content}")
+            # 检查是否有错误
+            if "error" in result:
+                logger.error(f"LLM关键词提取失败: {result['error']}")
                 return []
+            
+            # 确保结果是列表
+            if not isinstance(result, list):
+                logger.warning(f"LLM返回的不是列表: {type(result)}")
+                return []
+            
+            # 处理提取的关键词
+            processed_keywords = []
+            for keyword in result:
+                if not isinstance(keyword, dict):
+                    logger.warning(f"跳过非字典对象的关键词: {type(keyword)}")
+                    continue
+                
+                # 添加来源标记
+                keyword['source'] = 'enhanced_llm'
+                
+                # 添加上下文（如果没有提供）
+                if 'context' not in keyword:
+                    keyword['context'] = self._extract_context(text, keyword['name'])
+                
+                # 检查证据完整性
+                if 'evidence' not in keyword:
+                    logger.warning(f"关键词 {keyword['name']} 缺少证据信息")
+                    # 添加基本证据信息
+                    keyword['evidence'] = {
+                        'text_position': '未提供',
+                        'context': keyword['context'],
+                        'support_reason': 'LLM提取',
+                        'type_basis': 'LLM判断',
+                        'confidence_basis': 'LLM评估'
+                    }
+                
+                # 检查领域参考
+                if 'domain_reference' not in keyword:
+                    keyword['domain_reference'] = self.prompt_engineering.get_domain_knowledge_reference(
+                        keyword['name'], keyword.get('type')
+                    )
+                
+                processed_keywords.append(keyword)
+            
+            logger.info(f"增强LLM提取到 {len(processed_keywords)} 个关键词")
+            return processed_keywords
                 
         except Exception as e:
-            logger.error(f"LLM关键词提取失败: {e}")
+            logger.error(f"增强LLM关键词提取失败: {e}")
             return []
     
     def _deduplicate_and_rank_keywords(self, keywords: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -578,111 +577,74 @@ class KnowledgeExtractor:
         return relationships
     
     def _extract_relationships_by_llm(self, text: str, keywords: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """使用LLM提取关系"""
+        """使用增强的LLM提示工程提取关系"""
         try:
-            # 准备关键词信息
-            keyword_info = "\n".join([
-                f"- {kw['name']} ({kw['type']}, 置信度: {kw['confidence']})"
-                for kw in keywords if isinstance(kw, dict)
-            ])
+            # 使用增强的提示工程
+            prompt_data = self.prompt_engineering.build_enhanced_relationship_extraction_prompt(text, keywords)
+            result = self.prompt_engineering.call_llm_with_enhanced_prompt(prompt_data)
             
-            system_prompt = """你是一个计算机网络领域的专家，请从给定的文本和关键词中提取知识点之间的关系。
-
-要求：
-1. 识别关键词之间的语义关系
-2. 关系类型包括：APPLY_TO(应用于)、DEPENDS_ON(依赖于)、RELATED_TO(相关于)、WORKS_WITH(协同工作)、PROTECTS(保护)、ATTACKS(攻击)、SOLVED_BY(通过...解决)、BELONGS_TO(属于)、HAS_FUNCTION(具有功能)、BETWEEN(介于之间)
-3. 为每个关系给出置信度（0-1之间的数值）
-4. 返回JSON格式的结果
-
-返回格式示例：
-[
-  {
-    "source": {"name": "TCP", "type": "Protocol"},
-    "target": {"name": "传输层", "type": "Layer"},
-    "type": "APPLY_TO",
-    "confidence": 0.9,
-    "description": "TCP协议应用于传输层"
-  }
-]"""
-            
-            user_prompt = f"""请从以下文本和关键词中提取关系：
-
-文本：
-{text}
-
-关键词：
-{keyword_info}
-
-请返回JSON格式的结果。"""
-            
-            headers = {
-                "Authorization": f"Bearer {self.config.openai_api_key}",
-                "Content-Type": "application/json"
-            }
-            
-            data = {
-                "model": self.config.openai_model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                "temperature": 0.3,
-                "max_tokens": 1500
-            }
-            
-            # 确保URL以/chat/completions结尾
-            base_url = self.config.openai_base_url
-            if not base_url.endswith('/chat/completions'):
-                if base_url.endswith('/'):
-                    base_url += 'chat/completions'
-                else:
-                    base_url += '/chat/completions'
-            
-            response = requests.post(
-                base_url,
-                headers=headers,
-                json=data,
-                timeout=60  # 增加超时时间到60秒
-            )
-            response.raise_for_status()
-            
-            result = response.json()
-            content = result["choices"][0]["message"]["content"]
-            
-            # 尝试解析JSON
-            try:
-                llm_relationships = json.loads(content)
-                # 确保返回的是列表
-                if not isinstance(llm_relationships, list):
-                    logger.warning(f"LLM返回的不是列表: {type(llm_relationships)}")
-                    return []
-                
-                # 添加来源标记和补充信息，并确保每个关系都是字典
-                processed_relationships = []
-                for rel in llm_relationships:
-                    if isinstance(rel, dict):
-                        rel['extraction_method'] = 'llm'
-                        if 'context' not in rel:
-                            rel['context'] = text
-                        
-                        # 确保source和target是字典对象
-                        if 'source' in rel and not isinstance(rel['source'], dict):
-                            rel['source'] = {'name': str(rel['source']), 'type': 'Unknown'}
-                        
-                        if 'target' in rel and not isinstance(rel['target'], dict):
-                            rel['target'] = {'name': str(rel['target']), 'type': 'Unknown'}
-                        
-                        processed_relationships.append(rel)
-                    else:
-                        logger.warning(f"跳过非字典对象的关系: {type(rel)}")
-                
-                return processed_relationships
-            except json.JSONDecodeError:
-                logger.warning(f"LLM返回的不是有效JSON: {content}")
+            # 检查是否有错误
+            if "error" in result:
+                logger.error(f"LLM关系提取失败: {result['error']}")
                 return []
+            
+            # 确保结果是列表
+            if not isinstance(result, list):
+                logger.warning(f"LLM返回的不是列表: {type(result)}")
+                return []
+            
+            # 处理提取的关系
+            processed_relationships = []
+            for rel in result:
+                if not isinstance(rel, dict):
+                    logger.warning(f"跳过非字典对象的关系: {type(rel)}")
+                    continue
+                
+                # 添加提取方法标记
+                rel['extraction_method'] = 'enhanced_llm'
+                
+                # 添加上下文（如果没有提供）
+                if 'context' not in rel:
+                    rel['context'] = text
+                
+                # 确保source和target是字典对象
+                if 'source' in rel and not isinstance(rel['source'], dict):
+                    rel['source'] = {'name': str(rel['source']), 'type': 'Unknown'}
+                
+                if 'target' in rel and not isinstance(rel['target'], dict):
+                    rel['target'] = {'name': str(rel['target']), 'type': 'Unknown'}
+                
+                # 检查证据完整性
+                if 'evidence' not in rel:
+                    logger.warning(f"关系 {rel.get('source', {}).get('name', '')}-{rel.get('type', '')}-{rel.get('target', {}).get('name', '')} 缺少证据信息")
+                    # 添加基本证据信息
+                    rel['evidence'] = {
+                        'text_position': '未提供',
+                        'context': rel['context'],
+                        'logic_basis': 'LLM判断',
+                        'direction_basis': 'LLM判断',
+                        'confidence_basis': 'LLM评估'
+                    }
+                
+                # 检查领域参考
+                if 'domain_reference' not in rel:
+                    source_name = rel.get('source', {}).get('name', '')
+                    source_type = rel.get('source', {}).get('type', '')
+                    target_name = rel.get('target', {}).get('name', '')
+                    target_type = rel.get('target', {}).get('type', '')
+                    
+                    rel['domain_reference'] = {
+                        'source': self.prompt_engineering.get_domain_knowledge_reference(source_name, source_type),
+                        'target': self.prompt_engineering.get_domain_knowledge_reference(target_name, target_type)
+                    }
+                
+                processed_relationships.append(rel)
+            
+            logger.info(f"增强LLM提取到 {len(processed_relationships)} 个关系")
+            return processed_relationships
                 
         except Exception as e:
-            logger.error(f"LLM关系提取失败: {e}")
+            logger.error(f"增强LLM关系提取失败: {e}")
             return []
     
     def _deduplicate_and_rank_relationships(self, relationships: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

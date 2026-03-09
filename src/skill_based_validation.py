@@ -13,6 +13,7 @@ from abc import ABC, abstractmethod
 from neo4j import GraphDatabase
 import requests
 from dotenv import load_dotenv
+from .enhanced_prompt_engineering import EnhancedPromptEngineering, PromptEngineeringConfig
 
 # 加载环境变量
 load_dotenv()
@@ -281,179 +282,92 @@ class RelationshipValidator(SkillValidator):
         )
 
 class SemanticValidator(SkillValidator):
-    """语义验证技能 - 使用LLM验证语义合理性"""
+    """语义验证技能 - 使用增强的LLM提示工程验证语义合理性"""
+    
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        # 初始化增强的提示工程系统
+        prompt_config = PromptEngineeringConfig(
+            openai_api_key=config.get('openai_api_key', ''),
+            openai_model=config.get('openai_model', 'glm-4-flash'),
+            openai_base_url=config.get('openai_base_url', 'https://open.bigmodel.cn/api/paas/v4'),
+            strict_mode=True,
+            require_evidence=True,
+            min_confidence_threshold=0.7,
+            max_hallucination_risk=0.3
+        )
+        self.prompt_engineering = EnhancedPromptEngineering(prompt_config)
     
     def get_description(self) -> str:
-        return "使用大语言模型验证语义合理性"
+        return "使用增强的大语言模型验证语义合理性"
     
     def validate(self, item: Dict[str, Any], context: Dict[str, Any] = None) -> ValidationResult:
-        """使用LLM验证语义合理性"""
+        """使用增强的LLM提示工程验证语义合理性"""
         try:
             # 准备验证内容
             if 'source' in item and 'target' in item:
                 # 关系验证
-                content = f"关系: {item['source']['name']} --[{item['type']}]--> {item['target']['name']}"
                 validation_type = "relationship"
             else:
                 # 知识点验证
-                content = f"知识点: {item.get('name', '')} (类型: {item.get('type', '')})"
                 validation_type = "knowledge"
             
-            # 构建LLM验证提示
-            system_prompt = f"""你是一个计算机网络领域的专家，请验证以下{validation_type}的语义合理性。
-
-要求：
-1. 判断该{validation_type}在计算机网络领域是否合理
-2. 给出0-1之间的置信度评分
-3. 如果不合理，说明原因并提供改进建议
-
-返回JSON格式：
-{{
-    "is_valid": true/false,
-    "confidence": 0.0-1.0,
-    "reason": "验证原因",
-    "suggestions": ["建议1", "建议2"]
-}}"""
+            # 使用增强的提示工程
+            prompt_data = self.prompt_engineering.build_enhanced_validation_prompt(item, validation_type)
+            result = self.prompt_engineering.call_llm_with_enhanced_prompt(prompt_data, temperature=0.1, max_tokens=500)
             
-            user_prompt = f"""请验证以下{validation_type}的合理性：
-
-{content}
-
-描述: {item.get('description', item.get('context', ''))}
-
-请返回JSON格式的验证结果。"""
-            
-            headers = {
-                "Authorization": f"Bearer {self.config.get('openai_api_key', '')}",
-                "Content-Type": "application/json"
-            }
-            
-            data = {
-                "model": self.config.get('openai_model', 'glm-4-flash'),
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                "temperature": 0.1,
-                "max_tokens": 500
-            }
-            
-            # 确保URL以/chat/completions结尾
-            base_url = self.config.get('openai_base_url', 'https://open.bigmodel.cn/api/paas/v4')
-            if not base_url.endswith('/chat/completions'):
-                if base_url.endswith('/'):
-                    base_url += 'chat/completions'
-                else:
-                    base_url += '/chat/completions'
-            
-            response = requests.post(
-                base_url,
-                headers=headers,
-                json=data,
-                timeout=60  # 增加超时时间到60秒
-            )
-            response.raise_for_status()
-            
-            result = response.json()
-            content = result["choices"][0]["message"]["content"]
-            
-            # 解析LLM返回结果
-            try:
-                # 处理可能包含代码块标记的JSON
-                json_content = content
-                if content.startswith('```json'):
-                    json_content = content[7:]  # 移除```json
-                elif content.startswith('```'):
-                    json_content = content[3:]  # 移除```
-                if json_content.endswith('```'):
-                    json_content = json_content[:-3]  # 移除结尾的```
-                json_content = json_content.strip()
-                
-                # 尝试解析JSON，如果失败则尝试提取JSON部分
-                try:
-                    llm_result = json.loads(json_content)
-                except json.JSONDecodeError:
-                    # 尝试从内容中提取JSON部分
-                    import re
-                    json_pattern = r'\{.*\}'
-                    match = re.search(json_pattern, json_content, re.DOTALL)
-                    if match:
-                        json_str = match.group(0)
-                        llm_result = json.loads(json_str)
-                    else:
-                        raise json.JSONDecodeError("无法提取有效JSON", content, 0)
-                
+            # 检查是否有错误
+            if "error" in result:
+                logger.error(f"增强LLM验证失败: {result['error']}")
                 return ValidationResult(
-                    is_valid=llm_result.get('is_valid', False),
-                    confidence=llm_result.get('confidence', 0.5),
-                    reason=llm_result.get('reason', ''),
-                    suggestions=llm_result.get('suggestions', [])
+                    is_valid=True,
+                    confidence=0.3,
+                    reason=f"增强LLM验证失败: {result['error']}",
+                    suggestions=["请手动验证该项目的合理性"]
                 )
-            except json.JSONDecodeError as e:
-                logger.warning(f"LLM返回的不是有效JSON: {content}")
-                logger.warning(f"解析错误: {e}")
-                
-                # 尝试更灵活的JSON解析
-                try:
-                    # 尝试提取suggestions数组
-                    suggestions = []
-                    suggestions_match = re.search(r'"suggestions":\s*\[(.*?)\]', content, re.DOTALL)
-                    if suggestions_match:
-                        suggestions_text = suggestions_match.group(1)
-                        # 提取引号内的内容
-                        suggestion_items = re.findall(r'"([^"]*)"', suggestions_text)
-                        suggestions = [s for s in suggestion_items if s.strip()]
-                    
-                    # 尝试提取is_valid
-                    is_valid = True
-                    if 'false' in content.lower() or '无效' in content or '不正确' in content:
-                        is_valid = False
-                    
-                    # 尝试提取confidence
-                    confidence = 0.5
-                    conf_match = re.search(r'"confidence":\s*([0-9.]+)', content)
-                    if conf_match:
-                        try:
-                            confidence = float(conf_match.group(1))
-                        except ValueError:
-                            pass
-                    
-                    # 尝试提取reason
-                    reason = "JSON解析失败，但内容分析显示"
-                    reason_match = re.search(r'"reason":\s*"([^"]*)"', content)
-                    if reason_match:
-                        reason = reason_match.group(1)
-                    
-                    return ValidationResult(
-                        is_valid=is_valid,
-                        confidence=confidence,
-                        reason=reason,
-                        suggestions=suggestions
-                    )
-                except Exception as parse_error:
-                    logger.error(f"灵活解析也失败: {parse_error}")
-                    # 最后的回退选项
-                    if any(keyword in content.lower() for keyword in ['valid', '正确', '合理', '准确', '符合']):
-                        return ValidationResult(
-                            is_valid=True,
-                            confidence=0.7,
-                            reason="LLM返回内容显示验证通过，但JSON解析失败",
-                            suggestions=["请手动验证该项目的合理性"]
-                        )
-                    else:
-                        return ValidationResult(
-                            is_valid=True,
-                            confidence=0.5,
-                            reason="LLM验证失败，默认通过",
-                            suggestions=["请手动验证该项目的合理性"]
-                        )
+            
+            # 解析增强验证结果
+            is_valid = result.get('is_valid', False)
+            confidence = result.get('confidence', 0.5)
+            reason = result.get('reason', '')
+            suggestions = result.get('suggestions', [])
+            
+            # 检查额外的验证指标
+            domain_consistency = result.get('domain_consistency', 0.5)
+            internal_consistency = result.get('internal_consistency', 0.5)
+            evidence_sufficiency = result.get('evidence_sufficiency', 0.5)
+            hallucination_risk = result.get('hallucination_risk', 0.5)
+            
+            # 综合评估
+            if hallucination_risk > 0.7:
+                is_valid = False
+                confidence = min(confidence, 0.3)
+                reason += " [高风险：幻觉风险过高]"
+                suggestions.append("建议重新评估该项目，可能存在幻觉")
+            
+            # 添加增强验证的具体建议
+            if domain_consistency < 0.5:
+                suggestions.append("与领域知识库一致性较低，请检查是否符合计算机网络领域")
+            
+            if internal_consistency < 0.5:
+                suggestions.append("内部一致性较低，请检查属性之间的逻辑关系")
+            
+            if evidence_sufficiency < 0.5:
+                suggestions.append("证据不充分，请提供更多支持该项目的证据")
+            
+            return ValidationResult(
+                is_valid=is_valid,
+                confidence=confidence,
+                reason=reason,
+                suggestions=suggestions
+            )
                 
         except Exception as e:
-            logger.error(f"语义验证失败: {e}")
+            logger.error(f"增强语义验证失败: {e}")
             return ValidationResult(
                 is_valid=True,
                 confidence=0.3,
-                reason="语义验证失败，默认通过但置信度低",
+                reason="增强语义验证失败，默认通过但置信度低",
                 suggestions=["请手动验证该项目的合理性"]
             )
 
